@@ -1,0 +1,216 @@
+{
+  "schema_version": 1,
+  "name": "First Contact",
+  "map": {
+    "name": "First Contact: fictional test village",
+    "origin": {
+      "latitude": 0.0,
+      "longitude": 0.0
+    },
+    "bounds": {
+      "min": {
+        "x": 0.0,
+        "y": 0.0
+      },
+      "max": {
+        "x": 900.0,
+        "y": 600.0
+      }
+    },
+    "obstacles": [
+      {
+        "id": "west-north",
+        "vertices": [
+          {
+            "x": 180.0,
+            "y": 355.0
+          },
+          {
+            "x": 310.0,
+            "y": 355.0
+          },
+          {
+            "x": 310.0,
+            "y": 440.0
+          },
+          {
+            "x": 180.0,
+            "y": 440.0
+          }
+        ]
+      },
+      {
+        "id": "west-south",
+        "vertices": [
+          {
+            "x": 180.0,
+            "y": 150.0
+          },
+          {
+            "x": 310.0,
+            "y": 150.0
+          },
+          {
+            "x": 310.0,
+            "y": 235.0
+          },
+          {
+            "x": 180.0,
+            "y": 235.0
+          }
+        ]
+      },
+      {
+        "id": "center",
+        "vertices": [
+          {
+            "x": 405.0,
+            "y": 225.0
+          },
+          {
+            "x": 495.0,
+            "y": 225.0
+          },
+          {
+            "x": 495.0,
+            "y": 375.0
+          },
+          {
+            "x": 405.0,
+            "y": 375.0
+          }
+        ]
+      },
+      {
+        "id": "east-north",
+        "vertices": [
+          {
+            "x": 590.0,
+            "y": 355.0
+          },
+          {
+            "x": 720.0,
+            "y": 355.0
+          },
+          {
+            "x": 720.0,
+            "y": 440.0
+          },
+          {
+            "x": 590.0,
+            "y": 440.0
+          }
+        ]
+      },
+      {
+        "id": "east-south",
+        "vertices": [
+          {
+            "x": 590.0,
+            "y": 150.0
+          },
+          {
+            "x": 720.0,
+            "y": 150.0
+          },
+          {
+            "x": 720.0,
+            "y": 235.0
+          },
+          {
+            "x": 590.0,
+            "y": 235.0
+          }
+        ]
+      }
+    ],
+    "roads": [
+      {
+        "id": "east-west",
+        "name": "Crossing Street",
+        "points": [
+          {
+            "x": 0.0,
+            "y": 300.0
+          },
+          {
+            "x": 350.0,
+            "y": 300.0
+          },
+          {
+            "x": 350.0,
+            "y": 200.0
+          },
+          {
+            "x": 550.0,
+            "y": 200.0
+          },
+          {
+            "x": 550.0,
+            "y": 300.0
+          },
+          {
+            "x": 900.0,
+            "y": 300.0
+          }
+        ]
+      },
+      {
+        "id": "north",
+        "name": "North Street",
+        "points": [
+          {
+            "x": 350.0,
+            "y": 0.0
+          },
+          {
+            "x": 350.0,
+            "y": 600.0
+          }
+        ]
+      }
+    ],
+    "attribution": "Hand-authored synthetic fixture. NOT a real-world map.",
+    "warnings": [
+      "2D opaque building footprints only. No elevation, interiors, vegetation or bridge semantics yet."
+    ]
+  },
+  "forces": [
+    {
+      "faction": 1,
+      "name": "Blue",
+      "soldiers": 20,
+      "spawn": {
+        "x": 80.0,
+        "y": 290.0
+      },
+      "intent": {
+        "objective": "capture",
+        "target": {
+          "x": 550.0,
+          "y": 300.0
+        },
+        "radius_m": 45.0,
+        "casualty_tolerance": 0.55
+      }
+    },
+    {
+      "faction": 2,
+      "name": "Red",
+      "soldiers": 12,
+      "spawn": {
+        "x": 790.0,
+        "y": 290.0
+      },
+      "intent": {
+        "objective": "defend",
+        "target": {
+          "x": 550.0,
+          "y": 300.0
+        },
+        "radius_m": 45.0,
+        "casualty_tolerance": 0.55
+      }
+    }
+  ]
+}
