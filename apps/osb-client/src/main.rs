@@ -106,12 +106,18 @@ impl ClientState {
                 self.refresh();
                 self.status = "Scenario rebuilt. Ready to observe.".into();
             }
-            Err(e) => self.status = e.to_string(),
+            Err(e) => {
+                self.draft = self.sim.scenario().clone();
+                self.seed = self.sim.snapshot().seed;
+                self.status = format!("Edit rejected; previous scenario retained: {e}");
+            }
         }
     }
     fn save(&mut self) {
         let result = (|| -> Result<(), Box<dyn Error>> {
-            if let Some(parent) = self.save_path.parent() {
+            if let Some(parent) = self.save_path.parent()
+                && !parent.as_os_str().is_empty()
+            {
                 fs::create_dir_all(parent)?;
             }
             osb_campaign::save(&self.save_path, &self.sim.snapshot())?;
@@ -129,8 +135,13 @@ impl ClientState {
         match result {
             Ok(sim) => {
                 self.sim = sim;
+                self.seed = self.sim.snapshot().seed;
                 self.draft = self.sim.scenario().clone();
+                self.camera = MapCamera::new(self.draft.map.bounds.center());
                 self.refresh();
+                self.selected = self.view.first().map(|s| s.id);
+                self.follow = false;
+                self.mode = EditMode::Inspect;
                 self.previous.clear();
                 self.accumulator = 0.0;
                 self.paused = true;
