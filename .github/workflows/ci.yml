@@ -24,14 +24,15 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-      - run: cargo test --workspace --exclude osb-client
+      - run: cargo test --locked --workspace --exclude osb-client
       - run: python3 tools/check_boundaries.py
-      - name: Headless smoke and checkpoint
+      - name: Headless combat smoke and checkpoint
         run: |
           mkdir -p artifacts
-          cargo run -p osb-headless -- --duration 2m --save artifacts/smoke.osb --events artifacts/events.jsonl > artifacts/headless.json
-          cargo run -p osb-headless -- --load artifacts/smoke.osb --duration 10s > artifacts/resumed.json
-      - run: cargo clippy --workspace --exclude osb-client --all-targets -- -D warnings
+          cargo run --locked -p osb-headless -- --duration 8m --save artifacts/smoke.osb --events artifacts/events.jsonl > artifacts/headless.json
+          cargo run --locked -p osb-headless -- --load artifacts/smoke.osb --duration 10s > artifacts/resumed.json
+          test -s artifacts/events.jsonl
+      - run: cargo clippy --locked --workspace --exclude osb-client --all-targets -- -D warnings
       - run: cargo fmt --all -- --check
       - uses: actions/upload-artifact@v4
         if: always()
@@ -51,15 +52,15 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-      - run: cargo build -p osb-client
+      - run: cargo build --locked -p osb-client
       - name: Reject accidental X11 feature unification
         run: |
-          if cargo tree -p osb-client -e features | grep -E 'winit feature "x11"|bevy feature "x11"'; then
+          if cargo tree --locked -p osb-client -e features | grep -E 'winit feature "x11"|bevy feature "x11"'; then
             echo 'X11 feature unexpectedly enabled'; exit 1
           fi
       - name: Launch actual Wayland/Vulkan client under a headless compositor
         run: bash tools/wayland_smoke.sh
-      - run: cargo clippy -p osb-client --all-targets -- -D warnings
+      - run: cargo clippy --locked -p osb-client --all-targets -- -D warnings
       - uses: actions/upload-artifact@v4
         if: always()
         with:
