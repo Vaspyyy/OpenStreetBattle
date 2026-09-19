@@ -8,6 +8,10 @@ permissions:
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
+env:
+  CARGO_BUILD_JOBS: 2
+  CARGO_PROFILE_DEV_DEBUG: 0
+  CARGO_PROFILE_TEST_DEBUG: 0
 jobs:
   core:
     runs-on: ubuntu-24.04
@@ -18,7 +22,46 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test --workspace
-      - run: cargo clippy --workspace --all-targets -- -D warnings
-      - name: Formatting report
-        run: cargo fmt --all -- --check
+        with:
+          cache-on-failure: true
+      - run: cargo test --workspace --exclude osb-client
+      - run: python3 tools/check_boundaries.py
+      - name: Headless smoke and checkpoint
+        run: |
+          mkdir -p artifacts
+          cargo run -p osb-headless -- --duration 2m --save artifacts/smoke.osb --events artifacts/events.jsonl > artifacts/headless.json
+          cargo run -p osb-headless -- --load artifacts/smoke.osb --duration 10s > artifacts/resumed.json
+      - run: cargo clippy --workspace --exclude osb-client --all-targets -- -D warnings
+      - run: cargo fmt --all -- --check
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: headless-validation
+          path: artifacts/
+  wayland-vulkan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.95.0
+        with:
+          components: clippy
+      - name: Native Wayland and software Vulkan test dependencies
+        run: sudo apt-get update && sudo apt-get install -y libwayland-dev libxkbcommon-dev libvulkan1 mesa-vulkan-drivers weston
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - run: cargo build -p osb-client
+      - name: Reject accidental X11 feature unification
+        run: |
+          if cargo tree -p osb-client -e features | grep -E 'winit feature "x11"|bevy feature "x11"'; then
+            echo 'X11 feature unexpectedly enabled'; exit 1
+          fi
+      - name: Launch actual Wayland/Vulkan client under a headless compositor
+        run: bash tools/wayland_smoke.sh
+      - run: cargo clippy -p osb-client --all-targets -- -D warnings
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wayland-vulkan-validation
+          path: artifacts/
