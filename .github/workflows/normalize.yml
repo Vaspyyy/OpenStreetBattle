@@ -17,30 +17,50 @@ jobs:
   normalize:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.95.0
         with:
           components: rustfmt, clippy
+      - name: Native compile dependencies
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libwayland-dev libxkbcommon-dev
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-      - name: Lock, format and apply machine-applicable core lint fixes
+      - name: Apply audited foundation UI API migration
+        run: python3 tools/migrations/foundation_egui_036.py
+      - name: Format and apply machine-applicable lint fixes
         run: |
-          cargo generate-lockfile
           cargo fmt --all
-          cargo clippy --fix --allow-dirty --workspace --exclude osb-client --all-targets
+          cargo clippy --locked --fix --allow-dirty --workspace --all-targets
           cargo fmt --all
           mkdir -p scenarios
-          cargo run -p osb-headless -- --write-demo scenarios/first_contact.json
-      - name: Commit generated lockfile, scenario and tracked Rust changes safely
+          cargo run --locked -p osb-headless -- --write-demo scenarios/first_contact.json
+      - name: Validate normalized sources before committing
+        run: |
+          cargo test --locked --workspace --exclude osb-client
+          cargo clippy --locked --workspace --all-targets -- -D warnings
+          cargo fmt --all -- --check
+          python3 tools/check_boundaries.py
+          git diff --check
+      - name: Record source changes for review
+        if: always()
+        run: |
+          mkdir -p artifacts
+          git diff > artifacts/normalized.patch
+      - name: Commit generated scenario and tracked Rust changes safely
         run: |
           git fetch origin main
           test "$(git rev-parse origin/main)" = "$GITHUB_SHA"
           git add Cargo.lock scenarios/first_contact.json
           git ls-files -z '*.rs' | xargs -0 git add --
           if ! git diff --cached --quiet; then
-            git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'chore: lock dependencies, add demo scenario and normalize Rust source'
+            git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'fix: migrate native UI to egui 0.36 and pass strict workspace lints'
             git push origin HEAD:main
           fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: source-normalization-review
+          path: artifacts/normalized.patch
