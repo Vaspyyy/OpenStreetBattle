@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "weapons": [
+    {"id":"service_rifle","label":"Generic service rifle","ammunition":"generic_rifle","range_m":260.0,"cycle_ticks":12,"hit_probability":0.18,"suppression":0.18,"wound_severity":0.38,"starting_rounds":210},
+    {"id":"support_weapon","label":"Generic support weapon","ammunition":"generic_rifle","range_m":320.0,"cycle_ticks":7,"hit_probability":0.13,"suppression":0.25,"wound_severity":0.38,"starting_rounds":400}
+  ]
+}

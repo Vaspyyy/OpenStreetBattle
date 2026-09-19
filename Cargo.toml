@@ -1,0 +1,37 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+publish = false
+repository = "https://github.com/Vaspyyy/OpenStreetBattle"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+thiserror = "2"
+bevy_ecs = { version = "=0.19.1", default-features = false, features = ["std"] }
+rusqlite = { version = "0.37", features = ["bundled"] }
+zstd = "0.13"
+blake3 = "1"
+clap = { version = "4", features = ["derive"] }
+tempfile = "3"
+osb-world = { path = "crates/osb-world" }
+osb-content = { path = "crates/osb-content" }
+osb-planner = { path = "crates/osb-planner" }
+osb-sim = { path = "crates/osb-sim" }
+osb-campaign = { path = "crates/osb-campaign" }
+osb-map = { path = "crates/osb-map" }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[profile.dev]
+debug = 1
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

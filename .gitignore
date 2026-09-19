@@ -1,0 +1,11 @@
+/target/
+/saves/
+/cache/
+/artifacts/
+*.osb
+*.osb-journal
+*.osb-wal
+*.osb-shm
+.env
+.env.*
+!.env.example
