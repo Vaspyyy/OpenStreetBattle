@@ -1,0 +1,158 @@
+name: Apply native UI dependency patch
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/vendor-ui.yml]
+permissions:
+  contents: write
+concurrency:
+  group: native-ui-vendor
+  cancel-in-progress: false
+env:
+  CARGO_BUILD_JOBS: 2
+  CARGO_PROFILE_DEV_DEBUG: 0
+  CARGO_PROFILE_TEST_DEBUG: 0
+jobs:
+  vendor:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: vladbat00/bevy_egui
+          ref: cfc6f33d47ab21210abe42d3f7c3850c9162de82
+          path: .upstream-egui
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@1.95.0
+        with:
+          components: rustfmt, clippy
+      - name: Native test dependencies
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libwayland-dev libxkbcommon-dev libvulkan1 mesa-vulkan-drivers weston
+      - uses: Swatinem/rust-cache@v2
+        with:
+          add-job-id-key: false
+          shared-key: wayland-vulkan
+          cache-on-failure: true
+      - name: Vendor exact source and disable only unwanted window defaults
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -e vendor/bevy_egui
+          test "$(git -C .upstream-egui rev-parse HEAD)" = cfc6f33d47ab21210abe42d3f7c3850c9162de82
+          test "$(git -C .upstream-egui hash-object Cargo.toml)" = c8b2537249e27416fa0beae2a13a839a35845427
+          mkdir -p vendor/bevy_egui
+          git -C .upstream-egui archive HEAD Cargo.toml LICENSE README.md CHANGELOG.md .rustfmt.toml src examples | tar -x -C vendor/bevy_egui
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          import json
+          import re
+
+          def replace_once(path, old, new):
+              text = path.read_text()
+              assert text.count(old) == 1, (str(path), old)
+              path.write_text(text.replace(old, new))
+
+          root = Path('.')
+          vendor = root / 'vendor/bevy_egui'
+          replace_once(vendor / 'Cargo.toml',
+              'bevy_winit = { version = "0.19" }',
+              'bevy_winit = { version = "0.19", default-features = false }')
+          replace_once(root / 'Cargo.toml',
+              'members = ["crates/*", "apps/*"]',
+              'members = ["crates/*", "apps/*"]\nexclude = ["vendor/bevy_egui"]')
+          client = root / 'apps/osb-client/Cargo.toml'
+          replace_once(client,
+              'bevy_egui = { git = "https://github.com/vladbat00/bevy_egui", rev = "cfc6f33d47ab21210abe42d3f7c3850c9162de82",',
+              'bevy_egui = { path = "../../vendor/bevy_egui",')
+          replace_once(client,
+              '# Exact upstream v0.42.0 source revision. The registry package failed against\n# Bevy 0.19.1 with a nonexistent PipelineCacheError::ImmediateSize match arm.',
+              '# Upstream v0.42.0 source with a manifest-only Wayland patch.\n# See vendor/bevy_egui/OSB_PATCH.md and docs/DEPENDENCY_NOTES.md.')
+
+          provenance = {}
+          for path in sorted(vendor.rglob('*')):
+              if path.is_file():
+                  rel = path.relative_to(vendor).as_posix()
+                  original = root / '.upstream-egui' / rel
+                  if rel != 'Cargo.toml':
+                      assert path.read_bytes() == original.read_bytes(), rel
+                  provenance[rel] = hashlib.sha256(path.read_bytes()).hexdigest()
+          (vendor / 'OSB_FILES.sha256.json').write_text(json.dumps(provenance, indent=2) + '\n')
+          (vendor / 'OSB_PATCH.md').write_text('''# OpenStreetBattle dependency patch
+
+          Upstream: https://github.com/vladbat00/bevy_egui
+          Exact revision: cfc6f33d47ab21210abe42d3f7c3850c9162de82 (v0.42.0).
+          License: MIT; the upstream LICENSE is retained.
+
+          The only source change is in Cargo.toml: the bevy_winit dependency now has
+          default-features = false. Its upstream default enables X11, which violates
+          this application\'s native Wayland-only requirement. The application enables
+          Wayland explicitly through Bevy. No Rust or shader behavior was changed.
+
+          Included: manifest, license, README/changelog, rustfmt config, source and
+          example source. Upstream CI, image/demo assets and repository metadata are
+          not copied. No standalone font assets are copied. Examples are retained for
+          manifest completeness, not as an application feature.
+
+          OSB_FILES.sha256.json records included file hashes after the manifest patch.
+          Recheck the original revision and this one-line difference when updating.
+          This package is excluded from the application workspace. Run application
+          tests and the native no-X11/Wayland/Vulkan smoke check after any upgrade.
+          ''')
+          (root / 'docs/DEPENDENCY_NOTES.md').write_text('''# Native dependency verification
+
+          Bevy/bevy_ecs 0.19.1 and bevy_egui 0.42.0 are the foundation combination.
+          The UI integration source is pinned to upstream revision
+          cfc6f33d47ab21210abe42d3f7c3850c9162de82 under vendor/bevy_egui.
+
+          The crates.io 0.42.0 package failed against Bevy 0.19.1 because its renderer
+          referenced an unavailable PipelineCacheError::ImmediateSize variant. The
+          selected upstream revision does not have that match arm.
+
+          Native CI then detected a second integration issue: upstream bevy_egui
+          enabled bevy_winit\'s default features, which include X11. The vendored copy
+          applies exactly one manifest change: default-features = false on that
+          dependency. The application explicitly enables Wayland. Rust and shader
+          source remain unchanged, the MIT license is retained, and source hashes
+          are recorded in vendor/bevy_egui/OSB_FILES.sha256.json.
+
+          Keep native clipboard and URL-opening features disabled unless separately
+          validated. They must not enable an unwanted X11 integration. The normal CI
+          checks the feature graph and actually launches under Wayland/software Vulkan.
+          This is not a substitute for hardware-driver and KDE desktop testing.
+
+          No standalone font assets are copied. Application source licensing remains
+          for the owner to decide; the vendored dependency retains its own license.
+          ''')
+          PY
+          cargo check -p osb-client
+          git diff -- Cargo.lock
+      - name: Validate patched dependency and complete workspace
+        run: |
+          cargo test --locked --workspace --exclude osb-client
+          cargo clippy --locked --workspace --all-targets -- -D warnings
+          cargo fmt --all -- --check
+          python3 tools/check_boundaries.py
+          mkdir -p artifacts
+          cargo tree --locked -p osb-client -e features > artifacts/client-features.txt
+          if grep -E 'winit feature "x11"|bevy feature "x11"' artifacts/client-features.txt; then
+            echo 'X11 is still enabled'; exit 1
+          fi
+          cargo build --locked -p osb-client
+          git diff --check
+      - name: Commit audited patch and remove this one-time write workflow
+        run: |
+          git fetch origin main
+          test "$(git rev-parse origin/main)" = "$GITHUB_SHA"
+          git add Cargo.toml Cargo.lock apps/osb-client/Cargo.toml docs/DEPENDENCY_NOTES.md vendor/bevy_egui
+          git rm .github/workflows/vendor-ui.yml
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'fix: enforce Wayland-only through an audited UI dependency patch'
+          git push origin HEAD:main
+      - name: Launch native Wayland/Vulkan observer
+        run: bash tools/wayland_smoke.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-ui-patch-validation
+          path: artifacts/
