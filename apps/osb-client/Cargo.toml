@@ -12,7 +12,9 @@ bevy = { version = "=0.19.1", default-features = false, features = [
   "bevy_camera", "bevy_color", "bevy_image", "bevy_mesh", "bevy_shader",
   "mouse", "keyboard", "wayland", "png"
 ] }
-bevy_egui = { version = "=0.42.0", default-features = false, features = ["render", "default_fonts"] }
+# Exact upstream v0.42.0 source revision. The registry package failed against
+# Bevy 0.19.1 with a nonexistent PipelineCacheError::ImmediateSize match arm.
+bevy_egui = { git = "https://github.com/vladbat00/bevy_egui", rev = "cfc6f33d47ab21210abe42d3f7c3850c9162de82", default-features = false, features = ["render", "default_fonts"] }
 osb-sim.workspace = true
 osb-world.workspace = true
 osb-map.workspace = true

@@ -1,11 +1,18 @@
-name: Manual source normalization
+name: Source normalization
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [tools/normalize-request]
 permissions:
   contents: write
 concurrency:
   group: source-normalization
   cancel-in-progress: false
+env:
+  CARGO_BUILD_JOBS: 2
+  CARGO_PROFILE_DEV_DEBUG: 0
+  CARGO_PROFILE_TEST_DEBUG: 0
 jobs:
   normalize:
     if: github.ref == 'refs/heads/main'
@@ -16,23 +23,24 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.95.0
         with:
           components: rustfmt, clippy
-      - run: sudo apt-get update && sudo apt-get install -y libwayland-dev libxkbcommon-dev
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-      - name: Generate lockfile and apply Rust's machine-applicable formatting/lint suggestions
+      - name: Lock, format and apply machine-applicable core lint fixes
         run: |
           cargo generate-lockfile
           cargo fmt --all
-          cargo clippy --fix --allow-dirty --workspace --all-targets
+          cargo clippy --fix --allow-dirty --workspace --exclude osb-client --all-targets
           cargo fmt --all
-      - name: Commit only the lockfile and tracked Rust source, without overwriting concurrent work
+          mkdir -p scenarios
+          cargo run -p osb-headless -- --write-demo scenarios/first_contact.json
+      - name: Commit generated lockfile, scenario and tracked Rust changes safely
         run: |
           git fetch origin main
           test "$(git rev-parse origin/main)" = "$GITHUB_SHA"
-          git add Cargo.lock
+          git add Cargo.lock scenarios/first_contact.json
           git ls-files -z '*.rs' | xargs -0 git add --
           if ! git diff --cached --quiet; then
-            git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'chore: lock dependencies and normalize Rust source'
+            git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'chore: lock dependencies, add demo scenario and normalize Rust source'
             git push origin HEAD:main
           fi
