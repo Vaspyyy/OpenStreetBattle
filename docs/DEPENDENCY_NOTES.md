@@ -1,9 +1,24 @@
 # Native dependency verification
 
-The foundation uses Bevy/bevy_ecs 0.19.1 and the upstream bevy_egui v0.42.0 source pinned to commit `cfc6f33d47ab21210abe42d3f7c3850c9162de82`.
+Bevy/bevy_ecs 0.19.1 and bevy_egui 0.42.0 are the foundation combination.
+The UI integration source is pinned to upstream revision
+cfc6f33d47ab21210abe42d3f7c3850c9162de82 under vendor/bevy_egui.
 
-The first native CI build with the crates.io `bevy_egui = 0.42.0` package failed in its renderer with an unavailable `PipelineCacheError::ImmediateSize` variant. The selected upstream tag source does not contain that match arm. Pinning the exact source revision avoids a floating branch and makes the difference explicit. This change still requires the native CI build and runtime smoke test to pass; a version compatibility table alone is not sufficient evidence.
+The crates.io 0.42.0 package failed against Bevy 0.19.1 because its renderer
+referenced an unavailable PipelineCacheError::ImmediateSize variant. The
+selected upstream revision does not have that match arm.
 
-Upstream source: https://github.com/vladbat00/bevy_egui/tree/cfc6f33d47ab21210abe42d3f7c3850c9162de82
+Native CI then detected a second integration issue: upstream bevy_egui
+enabled bevy_winit's default features, which include X11. The vendored copy
+applies exactly one manifest change: default-features = false on that
+dependency. The application explicitly enables Wayland. Rust and shader
+source remain unchanged, the MIT license is retained, and source hashes
+are recorded in vendor/bevy_egui/OSB_FILES.sha256.json.
 
-No local upstream source patches or copied font assets are used. Native clipboard and URL opening features remain disabled so they cannot accidentally enable X11 integrations. Keep the headless dependency graph independent from these graphics dependencies.
+Keep native clipboard and URL-opening features disabled unless separately
+validated. They must not enable an unwanted X11 integration. The normal CI
+checks the feature graph and actually launches under Wayland/software Vulkan.
+This is not a substitute for hardware-driver and KDE desktop testing.
+
+No standalone font assets are copied. Application source licensing remains
+for the owner to decide; the vendored dependency retains its own license.

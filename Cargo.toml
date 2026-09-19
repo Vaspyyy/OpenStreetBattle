@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = ["crates/*", "apps/*"]
+exclude = ["vendor/bevy_egui"]
 default-members = ["apps/osb-headless"]
 
 [workspace.package]
