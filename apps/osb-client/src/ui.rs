@@ -2,8 +2,7 @@ use super::{ClientState, EditMode};
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, egui};
 use osb_sim::{
-    Action, EventKind, FactionId, FormationLevel, Soldier, SoldierId, TICKS_PER_SECOND,
-    VISION_RANGE,
+    Action, EventKind, FactionId, FormationLevel, Soldier, TICKS_PER_SECOND, VISION_RANGE,
 };
 use osb_world::Point;
 use std::collections::BTreeMap;
@@ -35,14 +34,15 @@ fn clock(tick: u64) -> String {
 pub fn draw(mut contexts: EguiContexts, mut state: NonSendMut<ClientState>) -> Result {
     let ctx = contexts.ctx_mut()?;
     if state.frame < 3 {
-        let mut style = (*ctx.style()).clone();
+        let mut style = (*ctx.style_of(egui::Theme::Dark)).clone();
         style.visuals = egui::Visuals::dark();
         style.visuals.panel_fill = egui::Color32::from_rgb(21, 28, 33);
         style.visuals.window_fill = egui::Color32::from_rgb(26, 34, 40);
         style.spacing.item_spacing = egui::vec2(9.0, 7.0);
-        ctx.set_style(style);
+        ctx.set_theme(egui::Theme::Dark);
+        ctx.set_style_of(egui::Theme::Dark, style);
     }
-    if !ctx.wants_keyboard_input() {
+    if !ctx.egui_wants_keyboard_input() {
         if ctx.input(|i| i.key_pressed(egui::Key::Space)) {
             state.paused = !state.paused;
         }
@@ -70,9 +70,17 @@ pub fn draw(mut contexts: EguiContexts, mut state: NonSendMut<ClientState>) -> R
             state.max_speed = true;
         }
     }
-    egui::TopBottomPanel::top("header")
-        .min_height(58.0)
-        .show(ctx, |ui| {
+    // bevy_egui owns the pass; do not call Context::run_ui here.
+    let mut viewport_ui = egui::Ui::new(
+        ctx.clone(),
+        "osb-viewport".into(),
+        egui::UiBuilder::new()
+            .layer_id(egui::LayerId::background())
+            .max_rect(ctx.viewport_rect()),
+    );
+    egui::Panel::top("header")
+        .min_size(58.0)
+        .show(&mut viewport_ui, |ui| {
             ui.horizontal_centered(|ui| {
                 ui.heading(
                     egui::RichText::new("OPENSTREETBATTLE")
@@ -94,11 +102,11 @@ pub fn draw(mut contexts: EguiContexts, mut state: NonSendMut<ClientState>) -> R
                 });
             });
         });
-    egui::TopBottomPanel::bottom("events")
+    egui::Panel::bottom("events")
         .resizable(true)
-        .default_height(170.0)
-        .min_height(110.0)
-        .show(ctx, |ui| {
+        .default_size(170.0)
+        .min_size(110.0)
+        .show(&mut viewport_ui, |ui| {
             ui.horizontal(|ui| {
                 ui.strong("FIELD LOG");
                 ui.label(
@@ -131,12 +139,12 @@ pub fn draw(mut contexts: EguiContexts, mut state: NonSendMut<ClientState>) -> R
                     for event in events {
                         ui.horizontal(|ui| {
                             ui.monospace(egui::RichText::new(clock(event.tick)).color(MUTED));
-                            if ui.selectable_label(false, &event.description).clicked() {
-                                if let Some(id) = event.actor {
-                                    state.selected = Some(id);
-                                    if let Some(s) = state.sim.inspect(id) {
-                                        state.camera.center = s.position;
-                                    }
+                            if ui.selectable_label(false, &event.description).clicked()
+                                && let Some(id) = event.actor
+                            {
+                                state.selected = Some(id);
+                                if let Some(s) = state.sim.inspect(id) {
+                                    state.camera.center = s.position;
                                 }
                             }
                         });
@@ -145,11 +153,11 @@ pub fn draw(mut contexts: EguiContexts, mut state: NonSendMut<ClientState>) -> R
             ui.separator();
             ui.label(egui::RichText::new(&state.status).small().color(MUTED));
         });
-    egui::SidePanel::left("setup")
+    egui::Panel::left("setup")
         .resizable(true)
-        .default_width(240.0)
-        .min_width(200.0)
-        .show(ctx, |ui| {
+        .default_size(240.0)
+        .min_size(200.0)
+        .show(&mut viewport_ui, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {
                 ui.heading("Observe");
                 ui.add_space(4.0);
@@ -320,11 +328,11 @@ pub fn draw(mut contexts: EguiContexts, mut state: NonSendMut<ClientState>) -> R
                 );
             });
         });
-    egui::SidePanel::right("inspector")
+    egui::Panel::right("inspector")
         .resizable(true)
-        .default_width(295.0)
-        .min_width(230.0)
-        .show(ctx, |ui| {
+        .default_size(295.0)
+        .min_size(230.0)
+        .show(&mut viewport_ui, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {
                 ui.heading("Person inspector");
                 let selected = state.selected.and_then(|id| state.sim.inspect(id).cloned());
@@ -335,7 +343,7 @@ pub fn draw(mut contexts: EguiContexts, mut state: NonSendMut<ClientState>) -> R
                 }
             });
         });
-    egui::CentralPanel::default().show(ctx, |ui| {
+    egui::CentralPanel::default().show(&mut viewport_ui, |ui| {
         map(ui, &mut state);
     });
     Ok(())

@@ -14,7 +14,7 @@ use bevy::{
     },
     window::PresentMode,
 };
-use bevy_egui::{EguiPlugin, EguiPrimaryContextPass};
+use bevy_egui::{EguiPlugin, EguiPrimaryContextPass, EguiStartupSet};
 use clap::Parser;
 use osb_map::MapCamera;
 use osb_sim::{DT, Scenario, Simulation, Soldier, SoldierId};
@@ -248,7 +248,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         frame: 0,
     };
     App::new()
-        .insert_non_send_resource(state)
+        .insert_non_send(state)
         .insert_resource(Smoke {
             frames: args.smoke_frames,
             screenshot: args.screenshot,
@@ -277,7 +277,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 }),
         )
         .add_plugins(EguiPlugin::default())
-        .add_systems(Startup, setup)
+        .add_systems(PreStartup, setup.before(EguiStartupSet::InitContexts))
         .add_systems(Update, (tick, smoke).chain())
         .add_systems(EguiPrimaryContextPass, ui::draw)
         .run();
@@ -323,13 +323,14 @@ fn smoke(
         state.paused = false;
         state.speed = 5.0;
     }
-    if test.frame == 20 && !test.captured {
-        if let Some(path) = test.screenshot.as_ref() {
-            commands
-                .spawn(Screenshot::primary_window())
-                .observe(save_to_disk(path.clone()));
-            test.captured = true;
-        }
+    if test.frame == 20
+        && !test.captured
+        && let Some(path) = test.screenshot.as_ref()
+    {
+        commands
+            .spawn(Screenshot::primary_window())
+            .observe(save_to_disk(path.clone()));
+        test.captured = true;
     }
     if test.frames.is_some_and(|n| test.frame >= n) {
         info!(
