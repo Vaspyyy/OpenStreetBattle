@@ -1,11 +1,11 @@
 name: Manual real-world provider acceptance
 on:
   workflow_dispatch:
-  push:
-    branches: [feature/real-world-scenarios]
-    paths: [.github/workflows/map-acceptance.yml]
 permissions:
   contents: read
+concurrency:
+  group: manual-map-provider-acceptance
+  cancel-in-progress: false
 defaults:
   run:
     shell: bash
