@@ -1,0 +1,26 @@
+name: Native map integration investigation
+on:
+  push:
+    branches: [feature/real-world-scenarios]
+    paths: [.github/workflows/map-investigation.yml]
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Collect source and native map API for integration
+        run: |
+          mkdir -p artifacts
+          git archive --format=tar HEAD > artifacts/osb-source.tar
+          git clone --depth 1 https://github.com/maplibre/maplibre-native-ffi.git /tmp/maplibre-ffi
+          git -C /tmp/maplibre-ffi rev-parse HEAD > artifacts/maplibre-revision.txt
+          tar -C /tmp/maplibre-ffi --exclude='*.ttf' --exclude='*.otf' --exclude='*.woff*' --exclude='.git' -czf artifacts/maplibre-api.tar.gz bindings/rust include CMakeLists.txt CMakePresets.json
+          curl --fail --silent --show-error https://api.github.com/repos/maplibre/maplibre-native-ffi/releases/tags/snapshot > artifacts/maplibre-snapshot.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: map-integration-source
+          path: artifacts/
