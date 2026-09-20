@@ -98,6 +98,19 @@ impl BrowserState {
         s.refresh_cache();
         s
     }
+    pub fn use_live_smoke(&mut self) {
+        self.fixture = false;
+        self.basemap_consent = true;
+        self.camera.jump(
+            GeoCoordinate {
+                latitude: 52.52,
+                longitude: 13.405,
+            },
+            14.0,
+        );
+        self.latitude = self.camera.center.latitude;
+        self.longitude = self.camera.center.longitude;
+    }
     fn refresh_cache(&mut self) {
         match SnapshotStore::new(geographic::cache_root()).list() {
             Ok(c) => self.cache = c,

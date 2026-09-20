@@ -53,6 +53,9 @@ struct Args {
     /// Open world view with the network-free native fixture (CI only).
     #[arg(long, requires = "smoke_frames")]
     world_smoke: bool,
+    /// Opt-in provider/network acceptance test, used only with --world-smoke.
+    #[arg(long, requires = "world_smoke")]
+    live_smoke: bool,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum EditMode {
@@ -258,9 +261,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     let draft = sim.scenario().clone();
     let view = sim.soldiers();
     let selected = view.first().map(|s| s.id);
+    let mut browser = browser::BrowserState::new(args.software_renderer, args.world_smoke);
+    if args.live_smoke {
+        browser.use_live_smoke();
+    }
     let state = ClientState {
         sim,
-        browser: browser::BrowserState::new(args.software_renderer, args.world_smoke),
+        browser,
         world_open: args.world_smoke,
         view,
         previous: BTreeMap::new(),
@@ -288,7 +295,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         last_tick_ms: 0.0,
         frame: 0,
     };
-    App::new()
+    let exit_status = App::new()
         .insert_non_send(state)
         .insert_resource(Smoke {
             frames: args.smoke_frames,
@@ -322,7 +329,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         .add_systems(Update, (tick, smoke).chain())
         .add_systems(EguiPrimaryContextPass, ui::draw)
         .run();
-    Ok(())
+    if matches!(exit_status, AppExit::Success) {
+        Ok(())
+    } else {
+        Err("native client exited with an error".into())
+    }
 }
 fn setup(mut commands: Commands, adapter: Res<RenderAdapterInfo>) {
     commands.spawn(Camera2d);

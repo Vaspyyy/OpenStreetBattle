@@ -20,5 +20,10 @@ timeout 90s target/debug/osb-client --software-renderer --smoke-frames "${OSB_SM
 cat artifacts/client.log
 grep -q 'OSB_NATIVE_WAYLAND' artifacts/client.log
 grep -q 'backend=Vulkan' artifacts/client.log
-grep -Eq 'OSB_SMOKE_OK tick=[1-9][0-9]*' artifacts/client.log
+if [[ " $* " == *" --world-smoke "* ]]; then
+  grep -q 'OSB_BASEMAP_OK' artifacts/client.log
+  grep -Eq 'OSB_SMOKE_OK tick=0 people=32' artifacts/client.log
+else
+  grep -Eq 'OSB_SMOKE_OK tick=[1-9][0-9]*' artifacts/client.log
+fi
 test -s artifacts/client.png

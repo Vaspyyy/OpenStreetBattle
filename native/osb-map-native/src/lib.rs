@@ -85,10 +85,14 @@ impl BasemapWorker {
 }
 impl Drop for BasemapWorker {
     fn drop(&mut self) {
-        self.stop.store(true, Ordering::Relaxed);
-        // The worker owns all native handles and destroys them on its owner thread.
-        // Never block the UI waiting for a driver or an HTTP cancellation.
-        let _ = self.thread.take();
+        self.stop.store(true, Ordering::Release);
+        // Native handles and TLS must finish destruction on the owner thread
+        // before the application exits. Detaching here can race native shutdown.
+        if let Some(worker) = self.thread.take()
+            && worker.join().is_err()
+        {
+            eprintln!("OSB_BASEMAP_WORKER_PANIC during shutdown");
+        }
     }
 }
 struct NativeMap {
@@ -223,7 +227,7 @@ fn run(
     let mut native: Option<NativeMap> = None;
     let mut dirty = true;
     let mut last = Instant::now() - Duration::from_secs(1);
-    while !stop.load(Ordering::Relaxed) {
+    while !stop.load(Ordering::Acquire) {
         let view = request
             .lock()
             .map_err(|_| "map request lock poisoned")?
