@@ -24,18 +24,24 @@ if [[ ! -f "$prefix/.osb-verified-$digest" ]]; then
     -H 'Accept: application/octet-stream' \
     'https://api.github.com/repos/maplibre/maplibre-native-ffi/releases/assets/574254252' -o "$tmp/native.tar.gz" >&2
   printf '%s  %s\n' "$digest" "$tmp/native.tar.gz" | sha256sum --check >&2
-  mkdir "$tmp/prefix"
-  tar --extract --gzip --file "$tmp/native.tar.gz" --directory "$tmp/prefix" --no-same-owner
-  python3 - "$tmp/prefix" "$revision" <<'PY'
+  mkdir "$tmp/unpacked"
+  tar --extract --gzip --file "$tmp/native.tar.gz" --directory "$tmp/unpacked" --no-same-owner
+  python3 - "$tmp/unpacked" "$revision" > "$tmp/prefix-path" <<'PY'
 import json, pathlib, sys
-prefix = pathlib.Path(sys.argv[1])
-meta = json.loads((prefix / 'share/maplibre-native-c/artifact.json').read_text())
+root = pathlib.Path(sys.argv[1])
+descriptors = list(root.glob('**/share/maplibre-native-c/artifact.json'))
+assert len(descriptors) == 1, 'Expected exactly one native install prefix'
+descriptor = descriptors[0]
+prefix = descriptor.parents[2]
+meta = json.loads(descriptor.read_text())
 assert meta['gitSha'] == sys.argv[2], 'Native source revision mismatch'
 assert meta['renderBackend'] == 'vulkan', 'Expected Vulkan artifact'
 assert meta['targetPlatform'] == 'linux-gnu-x64', 'Expected Linux x86_64 artifact'
 assert (prefix / 'lib/libmaplibre-native-c.a').is_file(), 'Missing native static archive'
+print(prefix)
 PY
-  touch "$tmp/prefix/.osb-verified-$digest"
-  mv "$tmp/prefix" "$prefix"
+  extracted=$(cat "$tmp/prefix-path")
+  touch "$extracted/.osb-verified-$digest"
+  mv "$extracted" "$prefix"
 fi
 printf '%s\n' "$prefix"
