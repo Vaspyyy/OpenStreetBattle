@@ -1,0 +1,121 @@
+name: Validate real-world acceptance slice
+on:
+  push:
+    branches: [feature/real-world-scenarios]
+    paths: [.github/workflows/finalize-map.yml]
+permissions:
+  contents: write
+concurrency:
+  group: finalize-real-world-slice
+  cancel-in-progress: false
+defaults:
+  run:
+    shell: bash
+env:
+  CARGO_BUILD_JOBS: 2
+  CARGO_PROFILE_DEV_DEBUG: 0
+  CARGO_PROFILE_TEST_DEBUG: 0
+jobs:
+  validate:
+    if: github.ref == 'refs/heads/feature/real-world-scenarios'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply verified regression tests and owner-thread shutdown fix
+        run: |
+          echo '020ef1b68b95a2e32930dc0f51aa14aabcb5c2e072dcca7552ee3328c12d912f  tools/.final-map-checks.patch.gz' | sha256sum --check
+          gzip -dc tools/.final-map-checks.patch.gz > /tmp/final.patch
+          git apply --check /tmp/final.patch
+          git apply /tmp/final.patch
+          rm tools/.final-map-checks.patch.gz
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('native/osb-map-native/src/lib.rs')
+          s = p.read_text()
+          old = '''        self.stop.store(true, Ordering::Relaxed);
+                  // The worker owns all native handles and destroys them on its owner thread.
+                  // Never block the UI waiting for a driver or an HTTP cancellation.
+                  let _ = self.thread.take();'''
+          new = '''        self.stop.store(true, Ordering::Release);
+                  // Native handles and TLS must finish destruction on the owner thread
+                  // before the application exits. Detaching here can race native shutdown.
+                  if let Some(worker) = self.thread.take()
+                      && worker.join().is_err()
+                  {
+                      eprintln!("OSB_BASEMAP_WORKER_PANIC during shutdown");
+                  }'''
+          assert s.count(old) == 1, 'Owner-thread shutdown source changed'
+          s = s.replace(old, new).replace('while !stop.load(Ordering::Relaxed)', 'while !stop.load(Ordering::Acquire)')
+          p.write_text(s)
+          p = Path('tools/wayland_smoke.sh')
+          s = p.read_text()
+          old = "grep -Eq 'OSB_SMOKE_OK tick=[1-9][0-9]*' artifacts/client.log"
+          new = '''if [[ " $* " == *" --world-smoke "* ]]; then
+            grep -q 'OSB_BASEMAP_OK' artifacts/client.log
+            grep -Eq 'OSB_SMOKE_OK tick=0 people=32' artifacts/client.log
+          else
+            grep -Eq 'OSB_SMOKE_OK tick=[1-9][0-9]*' artifacts/client.log
+          fi'''
+          assert s.count(old) == 1, 'Smoke assertion source changed'
+          p.write_text(s.replace(old, new))
+          PY
+      - uses: dtolnay/rust-toolchain@1.95.0
+        with:
+          components: rustfmt, clippy
+      - name: Format the source and commit only to the guarded feature branch
+        run: |
+          cargo fmt --all
+          cargo fmt --manifest-path native/osb-map-native/Cargo.toml
+          git fetch origin feature/real-world-scenarios
+          test "$(git rev-parse origin/feature/real-world-scenarios)" = "$GITHUB_SHA"
+          git add -A
+          git diff --cached --exit-code -- .github/workflows
+          mkdir -p artifacts
+          git diff --cached > artifacts/source-diff.patch
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'fix: join native map shutdown and add acquisition, clipping and replay regressions'
+          git push origin HEAD:feature/real-world-scenarios
+          git archive --format=tar HEAD > artifacts/validated-source.tar
+      - name: Native test dependencies
+        run: sudo apt-get update && sudo apt-get install -y libwayland-dev libxkbcommon-dev libvulkan-dev libclang-dev mesa-vulkan-drivers weston
+      - name: Install pinned native map prefix
+        run: |
+          prefix=$(bash tools/setup-maplibre.sh 2> artifacts/setup.log)
+          test -n "$prefix"
+          echo "MAPLIBRE_NATIVE_C_INSTALL_DIR=$prefix" >> "$GITHUB_ENV"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - name: Core regression tests and boundaries
+        run: |
+          cargo test --locked --workspace --exclude osb-client 2>&1 | tee artifacts/core-tests.log
+          python3 tools/check_boundaries.py
+      - name: Offline and live client tests and lints
+        run: |
+          cargo test --locked -p osb-client 2>&1 | tee artifacts/offline-client-tests.log
+          cargo build --locked -p osb-client --features live-map 2>&1 | tee artifacts/native-build.log
+          cargo test --locked -p osb-client --features live-map 2>&1 | tee artifacts/native-client-tests.log
+          cargo clippy --locked --workspace --all-targets --features osb-client/live-map -- -D warnings 2>&1 | tee artifacts/clippy.log
+          cargo fmt --all -- --check
+          cargo tree --locked -p osb-client --features live-map -e features > artifacts/features.txt
+          if grep -E 'winit feature "x11"|bevy feature "x11"' artifacts/features.txt; then exit 1; fi
+      - name: Native fixture render, unchanged battle clock and clean shutdown
+        run: |
+          OSB_SMOKE_FRAMES=180 bash tools/wayland_smoke.sh --world-smoke
+          mv artifacts/client.png artifacts/world-fixture.png
+          mv artifacts/client.log artifacts/world-fixture.log
+      - name: Explicit live OpenFreeMap acceptance viewport
+        run: |
+          OSB_SMOKE_FRAMES=600 bash tools/wayland_smoke.sh --world-smoke --live-smoke
+          mv artifacts/client.png artifacts/world-live.png
+          mv artifacts/client.log artifacts/world-live.log
+      - name: Existing battle observer still runs
+        run: |
+          bash tools/wayland_smoke.sh
+          mv artifacts/client.png artifacts/battle.png
+          mv artifacts/client.log artifacts/battle.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: real-world-acceptance
+          path: artifacts/
