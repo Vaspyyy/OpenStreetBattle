@@ -431,6 +431,24 @@ pub fn draw(ui: &mut egui::Ui, state: &mut BrowserState, seed: u64) -> Option<Pr
                 egui::StrokeKind::Inside,
             );
         }
+        // Attribution and status stay readable on both light and dark styles.
+        let backdrop = egui::Color32::from_rgba_unmultiplied(20, 28, 32, 240);
+        painter.rect_filled(
+            egui::Rect::from_min_max(
+                rect.left_top() + egui::vec2(8.0, 8.0),
+                rect.right_top() + egui::vec2(-8.0, 58.0),
+            ),
+            3.0,
+            backdrop,
+        );
+        painter.rect_filled(
+            egui::Rect::from_min_max(
+                rect.left_bottom() + egui::vec2(8.0, -37.0),
+                rect.right_bottom() + egui::vec2(-8.0, -8.0),
+            ),
+            3.0,
+            backdrop,
+        );
         painter.text(
             rect.left_top() + egui::vec2(14.0, 14.0),
             egui::Align2::LEFT_TOP,

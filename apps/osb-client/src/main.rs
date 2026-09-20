@@ -5,6 +5,8 @@ compile_error!(
 
 mod browser;
 mod geographic;
+#[cfg(test)]
+mod live_acceptance;
 mod ui;
 use bevy::{
     prelude::*,
