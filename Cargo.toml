@@ -1,7 +1,7 @@
 [workspace]
 resolver = "3"
 members = ["crates/*", "apps/*"]
-exclude = ["vendor/bevy_egui"]
+exclude = ["vendor/bevy_egui", "native/osb-map-native"]
 default-members = ["apps/osb-headless"]
 
 [workspace.package]
@@ -27,6 +27,7 @@ osb-planner = { path = "crates/osb-planner" }
 osb-sim = { path = "crates/osb-sim" }
 osb-campaign = { path = "crates/osb-campaign" }
 osb-map = { path = "crates/osb-map" }
+osb-geodata = { path = "crates/osb-geodata" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

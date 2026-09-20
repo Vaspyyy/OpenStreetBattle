@@ -1,4 +1,6 @@
 //! Authoritative map geometry. No renderer, network access or screen coordinates.
+mod geography;
+pub use geography::{GeoCoordinate, GeoRegion, MapSource, valid_digest};
 mod nav;
 mod osm;
 pub use nav::Navigation;
@@ -205,10 +207,15 @@ pub struct Map {
     pub roads: Vec<Road>,
     pub attribution: String,
     pub warnings: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<MapSource>,
 }
 impl Map {
     pub fn validate(&self) -> Result<(), WorldError> {
         self.origin.validate()?;
+        if let Some(source) = &self.source {
+            source.validate(self.origin, self.bounds)?;
+        }
         let b = self.bounds;
         if !b.min.finite()
             || !b.max.finite()
@@ -259,6 +266,7 @@ impl Map {
             |id, x, y, w, h| Obstacle::rectangle(id, Point::new(x, y), Point::new(x + w, y + h));
         Self {
             name:"First Contact: fictional test village".into(),
+            source: None,
             origin:GeoOrigin {latitude:0.0,longitude:0.0},
             bounds:Bounds {min:Point::new(0.0,0.0),max:Point::new(900.0,600.0)},
             obstacles:vec![rect("west-north",180.0,355.0,130.0,85.0),rect("west-south",180.0,150.0,130.0,85.0),rect("center",405.0,225.0,90.0,150.0),rect("east-north",590.0,355.0,130.0,85.0),rect("east-south",590.0,150.0,130.0,85.0)],

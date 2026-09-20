@@ -22,6 +22,11 @@ struct Args {
     /// Existing small OSM/Overpass JSON export. No network requests are made.
     #[arg(long, conflicts_with = "scenario")]
     map: Option<PathBuf>,
+    /// Load a verified, previously cached geographic snapshot. Never downloads.
+    #[arg(long, conflicts_with_all=["scenario","map","load"], requires="geo_cache")]
+    geo_snapshot: Option<String>,
+    #[arg(long, requires = "geo_snapshot")]
+    geo_cache: Option<PathBuf>,
     #[arg(long)]
     seed: Option<u64>,
     /// Additional simulated duration, integer plus s/m/h/d/w.
@@ -73,7 +78,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut sim = if let Some(path) = args.load {
         Simulation::restore(osb_campaign::load(path)?)?
     } else {
-        let scenario = if let Some(path) = args.scenario {
+        let scenario = if let (Some(id), Some(cache)) = (args.geo_snapshot, args.geo_cache) {
+            Scenario::on_map(osb_geodata::SnapshotStore::new(cache).load(&id)?.map)?
+        } else if let Some(path) = args.scenario {
             Scenario::parse(&read_bounded(&path, 64 * 1024 * 1024)?)?
         } else if let Some(path) = args.map {
             Scenario::on_map(osb_world::import_osm_json(&read_bounded(

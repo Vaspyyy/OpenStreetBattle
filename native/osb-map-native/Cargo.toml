@@ -1,0 +1,16 @@
+[package]
+name = "osb-map-native"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+publish = false
+
+[dependencies]
+maplibre-native-ffi = { git = "https://github.com/maplibre/maplibre-native-ffi", rev = "6f7998eec595560c0359ed033519cbab1f7c9aeb", features = ["vulkan"] }
+ash = "0.38"
+
+[build-dependencies]
+serde_json = "1"
+
+[lints.rust]
+unsafe_code = "deny"

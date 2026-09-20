@@ -16,9 +16,14 @@ for _ in $(seq 1 50); do
   sleep 0.1
 done
 if ! test -S "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY"; then cat artifacts/weston.log; exit 1; fi
-timeout 90s target/debug/osb-client --software-renderer --smoke-frames 100 --screenshot artifacts/client.png > artifacts/client.log 2>&1 || { cat artifacts/client.log; exit 1; }
+timeout 90s target/debug/osb-client --software-renderer --smoke-frames "${OSB_SMOKE_FRAMES:-100}" --screenshot artifacts/client.png "$@" > artifacts/client.log 2>&1 || { cat artifacts/client.log; exit 1; }
 cat artifacts/client.log
 grep -q 'OSB_NATIVE_WAYLAND' artifacts/client.log
 grep -q 'backend=Vulkan' artifacts/client.log
-grep -Eq 'OSB_SMOKE_OK tick=[1-9][0-9]*' artifacts/client.log
+if [[ " $* " == *" --world-smoke "* ]]; then
+  grep -q 'OSB_BASEMAP_OK' artifacts/client.log
+  grep -Eq 'OSB_SMOKE_OK tick=0 people=32' artifacts/client.log
+else
+  grep -Eq 'OSB_SMOKE_OK tick=[1-9][0-9]*' artifacts/client.log
+fi
 test -s artifacts/client.png

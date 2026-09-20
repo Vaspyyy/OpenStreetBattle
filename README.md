@@ -2,7 +2,7 @@
 
 A Linux-native, Wayland-only, Vulkan-first **spectator warfare sandbox**. Set up forces and intent, press Play, and inspect the persistent people making decisions underneath the dots.
 
-**Status: runnable 0.1 foundation, not the 1.0 release.** The current game is a bounded, offline battle prototype. The long-term goal is concurrent battles and tens of thousands of persistent individuals over simulated years.
+**Status: real-world sandbox slice in development, not the 1.0 release.** The current game is a bounded battle prototype with an optional native World view. The long-term goal is concurrent battles and tens of thousands of persistent individuals over simulated years.
 
 ## Run the native observer
 
@@ -29,6 +29,16 @@ The window opens paused. Press **Space**, or click **Play**. The forces initiall
 
 Default saves go to `$XDG_STATE_HOME/openstreetbattle/checkpoint.osb`, or `~/.local/state/openstreetbattle/checkpoint.osb` when XDG_STATE_HOME is unset. Saves are manual. Resetting a scenario discards unsaved progress.
 
+## Browse real maps and create cached battle areas
+
+```bash
+bash tools/run-live.sh
+```
+
+Open **World**, enable the live basemap, select an area, fetch/reuse its geography, review the limitations, and create a battle. Battle areas are limited to 100-2000 metres per side in this first slice. The offline client remains available without the native map dependency. See [real-world setup and data boundaries](docs/REAL_WORLD.md) for build dependencies, service configuration, cache reuse and native renderer limitations.
+
+The soldier inspector also includes **Why this decision?**, with actual decision branches and navigation results rather than generated narration.
+
 ## Run without a display or GPU
 
 ```bash
@@ -53,7 +63,7 @@ These are prototype implementations, not a claim of validated battlefield realis
 
 ## Important limits
 
-**The live MapLibre/OpenFreeMap basemap is not integrated.** The bundled map is hand-authored, not a fetched real town. Local OSM import is not a full terrain pipeline: no interiors, elevation, forests, rivers, bridge topology or multipolygon relations yet. Missing geography is unknown, not proof of open terrain. See [map data](docs/MAP_DATA.md).
+**The optional World view uses MapLibre Native/OpenFreeMap; the default demo remains hand-authored.** Selected geographic snapshots can create battles, but this is not a full terrain pipeline: no interiors, elevation, forests, rivers, bridge topology or multipolygon relations yet. Missing geography is unknown, not proof of open terrain. See [map data](docs/MAP_DATA.md).
 
 There is no campaign mode, simulation LOD, vehicle/supply network, sophisticated operational planning, complete social model, or validated tens-of-thousands combat capacity yet. Grenades are currently carried data, not implemented attacks. Performance probes are not evidence of campaign-scale battle performance.
 

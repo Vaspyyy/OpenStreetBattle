@@ -73,7 +73,7 @@ pub fn import_osm_json(input: &str) -> Result<Map, WorldError> {
     origin.validate()?;
     let a = origin.project(low.0, low.1)?;
     let b = origin.project(high.0, high.1)?;
-    let mut map=Map{name:"Imported OSM extract".into(),origin,bounds:Bounds{min:Point::new(a.x-40.0,a.y-40.0),max:Point::new(b.x+40.0,b.y+40.0)},obstacles:Vec::new(),roads:Vec::new(),attribution:"© OpenStreetMap contributors, ODbL 1.0. Source: user-supplied OSM JSON extract.".into(),warnings:vec!["Only simple closed building ways and highway polylines are imported. Missing features are UNKNOWN, not verified open terrain. No interiors, height/elevation, walls, rivers, vegetation, bridges or multipolygon relations yet.".into()]};
+    let mut map=Map{source:None,name:"Imported OSM extract".into(),origin,bounds:Bounds{min:Point::new(a.x-40.0,a.y-40.0),max:Point::new(b.x+40.0,b.y+40.0)},obstacles:Vec::new(),roads:Vec::new(),attribution:"© OpenStreetMap contributors, ODbL 1.0. Source: user-supplied OSM JSON extract.".into(),warnings:vec!["Only simple closed building ways and highway polylines are imported. Missing features are UNKNOWN, not verified open terrain. No interiors, height/elevation, walls, rivers, vegetation, bridges or multipolygon relations yet.".into()]};
     let mut unsupported_relations = 0;
     let mut incomplete = 0;
     for e in &doc.elements {

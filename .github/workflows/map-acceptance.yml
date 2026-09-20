@@ -1,0 +1,65 @@
+name: Manual real-world provider acceptance
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: manual-map-provider-acceptance
+  cancel-in-progress: false
+defaults:
+  run:
+    shell: bash
+env:
+  CARGO_BUILD_JOBS: 2
+  CARGO_PROFILE_DEV_DEBUG: 0
+  CARGO_PROFILE_TEST_DEBUG: 0
+jobs:
+  native-map:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.95.0
+        with:
+          components: rustfmt, clippy
+      - name: Native dependencies
+        run: sudo apt-get update && sudo apt-get install -y libwayland-dev libxkbcommon-dev libvulkan-dev libclang-dev mesa-vulkan-drivers weston
+      - name: Install pinned MapLibre prefix
+        run: |
+          mkdir -p artifacts
+          git rev-parse HEAD > artifacts/source-revision.txt
+          prefix=$(bash tools/setup-maplibre.sh)
+          echo "MAPLIBRE_NATIVE_C_INSTALL_DIR=$prefix" >> "$GITHUB_ENV"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - name: Compile and lint
+        run: |
+          cargo build --locked -p osb-client --features live-map
+          cargo test --locked -p osb-client --features live-map 2>&1 | tee artifacts/tests.log
+          cargo clippy --locked -p osb-client --features live-map --all-targets -- -D warnings
+          cargo fmt --all -- --check
+      - name: Explicit single small OSM acquisition and checkpoint acceptance
+        env:
+          OSB_LIVE_TEST_ENDPOINT: https://overpass-api.de/api/interpreter
+          OSB_LIVE_TEST_OUTPUT: ${{ github.workspace }}/artifacts/geodata
+        run: |
+          timeout 240s cargo test --locked -p osb-client --features live-map live_geography_roundtrip -- --ignored --nocapture 2>&1 | tee artifacts/acquisition.log
+          test -s artifacts/geodata/scenario.json
+          test -s artifacts/geodata/summary.json
+      - name: Render the acquired real geometry and individual observer
+        run: |
+          OSB_SMOKE_FRAMES=80 bash tools/wayland_smoke.sh artifacts/geodata/scenario.json
+          mv artifacts/client.png artifacts/real-battle.png
+          mv artifacts/client.log artifacts/real-battle.log
+      - name: Live native map screenshot with readable attribution
+        if: always()
+        run: |
+          OSB_SMOKE_FRAMES=300 bash tools/wayland_smoke.sh --world-smoke --live-smoke
+          mv artifacts/client.png artifacts/world-live.png
+          mv artifacts/client.log artifacts/world-live.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: final-map-acceptance
+          path: artifacts/

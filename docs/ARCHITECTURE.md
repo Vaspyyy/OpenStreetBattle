@@ -2,72 +2,73 @@
 
 ## Current dependency boundaries
 
-The workspace uses Rust 2024. Exact graphical dependency choices are recorded in the manifests, Cargo.lock and DEPENDENCY_NOTES.md. Do not upgrade them independently or replace the native client with a browser wrapper.
+The workspace uses Rust 2024. Graphical dependencies and their compatibility patches are recorded in the manifests, Cargo.lock and DEPENDENCY_NOTES.md. Do not upgrade them independently or replace the native client with a browser wrapper.
 
 | Package | Current responsibility |
 | --- | --- |
-| osb-world | Validated bounded 2D map geometry, geographic origin/local metre conversion, simple OSM JSON import, obstacle LOS and navigation. |
-| osb-content | Validated generic equipment definitions. Initial loadout construction still expects the baseline content IDs. |
-| osb-planner | Structured intent and validation against the map. No network client or language model integration. |
-| osb-sim | GPU-independent reference simulation, ECS storage, identities, clock/RNG, formations, knowledge, behavior, combat, health and events. |
-| osb-campaign | Transactional SQLite checkpoints containing versioned compressed simulation snapshots. This is persistence infrastructure, not a campaign simulator. |
-| osb-map | Presentation-only map camera and coordinate transforms. No MapLibre backend yet. |
-| osb-headless | CLI scenario loading, simulation, checkpointing, event export and performance probes. |
-| osb-client | Bevy native window/rendering, egui interface and offline geometry drawing. Drives the same simulation as the headless executable. |
+| osb-world | Validated bounded 2D geometry, geographic/local metre conversion, battle-region validation, simple OSM JSON import, obstacle LOS and navigation. |
+| osb-geodata | Offline geometry compilation and clipping, content-addressed snapshots, integrity verification and provenance. No network or renderer. |
+| osb-content | Validated generic equipment definitions. Initial loadout construction still expects baseline content IDs. |
+| osb-planner | Structured intent and map validation. No network client or language-model integration. |
+| osb-sim | GPU-independent reference simulation, ECS storage, identities, clock/RNG, formations, knowledge, behavior, combat, health, events and non-authoritative decision diagnostics. |
+| osb-campaign | Transactional SQLite checkpoints containing versioned compressed snapshots. Persistence infrastructure, not a campaign simulator. |
+| osb-map | Presentation-only tactical and global browsing cameras and coordinate transforms. |
+| osb-map-native | Optional, isolated MapLibre Native Vulkan owner thread, bounded frame exchange and dedicated device ownership. Located under native/, outside the core workspace. |
+| osb-headless | Offline scenario/snapshot loading, simulation, checkpoints, event export and performance probes. |
+| osb-client | Bevy Wayland/Vulkan observer, egui interface, geometry drawing, optional World view and explicit bounded geographic acquisition. |
 
-`tools/check_boundaries.py` checks the headless dependency graph. Rendering, windowing and network clients do not belong in the core graph.
+`tools/check_boundaries.py` checks the headless dependency graph. Rendering, windowing and network clients do not belong in that graph. The graphical world does not own the simulation's ECS world.
 
-The current simulation runs on the observer's main thread with a bounded frame work budget. A separate simulation worker is a future optimization, not an implemented feature. The graphical world does not own the simulation's ECS world.
+The simulation runs on the observer's main thread with a bounded frame work budget. A separate ongoing simulation worker is a future optimization. Geography acquisition/preparation and native basemap rendering have their own workers; neither updates an active battle. World browsing pauses and preserves the current battle. Installing a prepared scenario is an explicit replacement boundary.
 
 ## Identity and organization
 
 `SoldierId`, `FormationId` and `FactionId` are serialized domain identities. Bevy `Entity` values are runtime storage handles only. Death retains the person. Render culling must never mutate the roster.
 
-A soldier's assigned formation and current group are distinct. Initial organization is generated as platoons, squads and fireteams; hierarchy changes and leadership succession operate on those identities. This is not yet a complete army/corps/battalion order-of-battle editor.
+Assigned formation and current group are distinct. Initial organization is generated as platoons, squads and fireteams; hierarchy changes and leadership succession operate on those identities. This is not a complete army/corps/battalion editor.
 
 Relationships are sparse references to persistent people, not a dense all-to-all matrix. The foundation seeds simple bonds and uses them in basic behavior. A full social/personality simulation remains 1.0 work.
 
 ## Time and reproducibility
 
-The reference clock is an integer tick counter at 10 ticks per simulated second. The simulation never reads wall time or camera state. The client may interpolate display positions, but it may not interpolate authoritative injuries, ammunition or decisions.
+The reference clock is an integer tick counter at 10 ticks per simulated second. The simulation never reads wall time or camera state. Display positions may be interpolated, but authoritative injuries, ammunition and decisions may not.
 
-Randomness has explicit serialized state. Stable iteration and a single authoritative update sequence are the reference contract. Tests establish repeatability and exact checkpoint continuation on the tested build/platform. Do not advertise universal cross-architecture bitwise determinism without testing it, especially while geometric calculations use floating point.
+Randomness has explicit serialized state. Stable iteration and a single authoritative update sequence form the reference contract. Tests establish repeatability and exact checkpoint continuation on the tested build/platform. Floating-point geometry means cross-architecture bitwise determinism needs separate validation.
 
-Speed controls ask the runner to do more simulation work. They do not skip injury updates or silently discard ticks to hit a requested speed. Maximum speed is workload-dependent.
+Speed controls request more simulation work, not skipped injury updates or discarded ticks. Maximum speed is workload-dependent.
 
-## Perception, command and combat
+## Perception, command, combat and diagnostics
 
-For 1.0 the desired model is local LOS plus communication. In the current slice, simple opaque building polygons obstruct sight and shots; nearby/radio contact sharing is deliberately limited. A shared report does not grant the recipient permission to shoot through a building.
+For 1.0 the desired model is local LOS plus communication. Simple opaque building polygons currently obstruct sight and shots; nearby/radio sharing is deliberately limited. A shared report does not grant permission to shoot through a building.
 
-Facing/FOV and persistent stale intelligence belong to 2.0. Attention and recognition belong to 3.0. Do not implement omniscient command as a hidden shortcut while the UI calls soldiers locally informed.
+Facing/FOV and stale intelligence belong to 2.0. Attention and recognition belong to 3.0. Do not implement omniscient command as a hidden shortcut.
 
-Intent is structured data. Code-driven formation and individual behavior execute it. The current commander logic is a small heuristic prototype, not an operational planning engine. A future LLM adapter may produce candidate intent only. Validate it, show it to the scenario author, then persist it. No model inference belongs in a tick, perception update or soldier decision loop.
+Intent is structured data executed by code-driven formations and individuals. Commander logic is a small heuristic prototype, not an operational planning engine. Any future LLM adapter produces candidate intent only: validate it, show it to the author, then persist it. Model inference does not belong in simulation ticks.
 
-Combat and trauma are coarse reference models. Wounds affect function and may bleed; treatment is not an instant restoration to full health. Resources must be conserved. Numeric tuning is provisional and must not be presented as medical or military validation.
+Combat and trauma are coarse reference models. Wounds affect function and may bleed; treatment is not instant full recovery. Resources must be conserved. Numeric tuning is provisional, not medical or military validation.
 
-## Geography
+Decision traces are emitted from the actual decision/navigation branches with sampled inputs, reasons and a bounded recent history. They consume no randomness and do not feed back into behavior. They are excluded from authoritative saves; trace on/off must leave fingerprints unchanged. Inspector explanations must not be invented from the final action after the fact.
 
-Keep source coordinates and a geographic origin, but use local metre coordinates for bounded tactical calculations. Screen pixels and Bevy transforms are presentation only. A regional frame is not a global map projection suitable for arbitrary continent-sized campaigns.
+## Geography and native rendering
 
-The authoritative map is independent from the visual map. An eventual pretty tile layer cannot become the source of collision or LOS truth. Importing missing, incomplete or unsupported features must surface limitations rather than inventing reliable terrain.
+Use a geographic origin and local metres for tactical calculations. Global browsing uses Web Mercator only for presentation. A regional frame is not a continent-sized campaign projection.
+
+The optional live tile layer is independent from authoritative geometry. Provider pixels, zoom simplifications and missing features cannot define trustworthy collision/LOS. The current compiler clips supported building ways and road polylines to a validated region, records provenance and warns about unsupported data. See MAP_DATA.md and REAL_WORLD.md for exact limits.
+
+A geography snapshot contains raw source, compiled geometry, manifest and attribution. Its identity covers source, region, endpoint and compiler/schema version. Loads verify hashes and provenance. Checkpoints embed compiled geometry: provider updates cannot move an ongoing battle's buildings.
+
+Native MapLibre runs on its own owner thread and dedicated Vulkan device. Session/map/runtime destruction precedes device destruction, and worker shutdown is joined before application exit. The initial bridge is bounded RGBA readback/upload with camera reprojection, not zero-copy sharing with Bevy. Unsafe handle work remains isolated to the Vulkan ownership module, never the simulation.
 
 ## Persistence and events
 
-Current checkpoints store a complete versioned snapshot in SQLite, compressed with zstd and protected by a BLAKE3 digest. The snapshot includes people, formation state, map/content, clock, random state and recent events. Saves retain checkpoints transactionally. Unknown/incompatible schemas and invalid snapshots are rejected.
+Checkpoints store a complete versioned snapshot in SQLite, compressed with zstd and protected by a BLAKE3 digest. People, formations, map/content, clock, random state and recent events are included. Checkpoints are retained transactionally; incompatible schemas and invalid snapshots are rejected.
 
-This is not an unlimited event-sourced database. The in-memory event history is bounded. The headless runner can stream new events to JSON Lines. A replay UI, long-term event archive, recovery tooling and schema migrations are future work.
+This is not an unlimited event-sourced database. In-memory history is bounded; the headless runner can stream JSON Lines. Replay UI, long-term archives, recovery tooling and schema migrations remain future work.
 
 ## Campaign-compatible foundations, not an implemented campaign
 
-Persistent identity does not imply continuously updating every person at tactical frequency. Future operational abstraction may schedule groups and materialize detailed state, but it must preserve identities, inventories, injuries and meaningful relationships.
+Persistent identity does not imply continuously updating every person tactically. Future abstraction may schedule groups and materialize detailed state while preserving identities, inventories, injuries and relationships.
 
-Required invariants before calling LOD usable:
+Before calling LOD usable, verify conservation across transitions; time-dependent injuries, needs and hazards offscreen; camera-independent outcomes; consistent crossing/contact time between resolutions; save/resume during transitions and concurrent battles; and measured abstraction error/performance against the reference model.
 
-1. People and resources are conserved across every transition.
-2. Injuries, time-dependent needs and ongoing hazards do not freeze offscreen.
-3. Camera movement does not reroll casualties or change the authoritative outcome.
-4. Opposing groups crossing resolution boundaries share consistent time and contact state.
-5. Save/resume works during transitions and simultaneous battles.
-6. Error and performance are measured against the reference model on representative workloads.
-
-These invariants guide the architecture now. The operational scheduler, logistics world, reinforcements and multi-battle campaign are not implemented yet.
+The operational scheduler, logistics world, reinforcements and multi-battle campaign are not implemented yet.

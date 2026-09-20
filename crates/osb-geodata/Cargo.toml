@@ -1,17 +1,18 @@
 [package]
-name = "osb-headless"
+name = "osb-geodata"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
-osb-geodata.workspace = true
-osb-sim.workspace = true
 osb-world.workspace = true
-osb-campaign.workspace = true
+serde.workspace = true
 serde_json.workspace = true
-clap.workspace = true
+thiserror.workspace = true
+blake3.workspace = true
+tempfile.workspace = true
+geo = { version = "=0.31.0", default-features = false }
 
 [lints]
 workspace = true

@@ -1,38 +1,44 @@
-# Map data: current backend and future integration
+# Map data
 
-## Current behavior
+## Three supported entry paths
 
-The default First Contact map is **synthetic, hand-authored geometry**. It is not downloaded from a real location. It gives the reference simulation a deterministic, offline fixture and avoids making CI depend on a public map server.
+The bundled First Contact map remains synthetic, hand-authored geometry. It is a deterministic offline fixture, not a downloaded town.
 
-Both executables support an existing small OSM/Overpass JSON export:
+Both executables also accept an existing small OSM/Overpass JSON export without network access:
 
 ```bash
 cargo run --locked -p osb-client -- --map path/to/export.json
 cargo run --locked -p osb-headless -- --map path/to/export.json --duration 8m
 ```
 
-The observer also has an import control before Play. These paths do not issue network requests. Standard GeoJSON, OSM XML and PBF are not supported by this importer.
+That legacy importer accepts simple ways with inline geometry or references to included nodes. OSM XML/PBF and arbitrary GeoJSON are not supported inputs.
 
-Supported JSON has an `elements` array containing simple `way` objects with either inline `geometry` coordinates or references to included `node` objects. Closed `building` ways become opaque, non-walkable polygon footprints. `highway` ways become displayed road polylines. Incomplete building ways are skipped rather than turned into arbitrary walls.
+The new World view supplies the third path: browse an optional native live basemap, select a bounded region, explicitly acquire/reuse authoritative geography, review warnings, and create a battle. Run `bash tools/run-live.sh` to enable MapLibre Native Vulkan. Full instructions and provider/cache constraints are in [REAL_WORLD.md](REAL_WORLD.md).
 
-Current limits include a 32 MiB input cap, an element cap and bounded local geometry/navigation. Import a small area, not a country or planet extract. The importer reports warnings and preserves a source attribution string.
+## Visual and authoritative pipelines
 
-## What this does not model
+The World view renders OpenFreeMap vector tiles using MapLibre Native. It is presentation only. It does not determine collision, visibility or traversability, and may differ in date or supported detail from a battle snapshot. The current battle view draws authoritative geometry rather than that visual tile image.
 
-No building interiors, windows, entrances, floor/roof heights, terrain elevation, vegetation, walls, rivers, bridge-layer connectivity or multipolygon relations are imported yet. A displayed road is not proof of a complete routable transport network. Buildings currently behave as opaque 2D obstacles, not occupied 3D structures.
+`osb-geodata` separately compiles supported OpenStreetMap building ways and road polylines. It clips features to selected bounds before local projection, including disconnected pieces of concave footprints. Incomplete ways are skipped instead of inventing connections. Server error/partial-response remarks are rejected.
 
-Missing data means **unknown**, not verified open terrain. Do not label a generated battle physically realistic just because its street shapes came from a real map.
+Each battle region is 100 to 2000 metres on either side, at most 4 km², within the local projection's latitude envelope and without crossing the date line. These limits bound this tactical slice, not the eventual campaign design. Source input is capped at 32 MiB; element, vertex, geometry and navigation limits also apply.
 
-## Two independent pipelines
+## What remains unknown
 
-The planned visual pipeline may use MapLibre Native and an OSM-derived vector tile source such as OpenFreeMap. It is **not integrated into this commit's executable**. Vulkan texture interoperation, camera synchronization and offline caching need an isolated prototype before committing the simulation to that backend.
+No interiors, windows, entrances, elevation, floor/roof heights, vegetation, water barriers, bridge-layer connectivity, multi-level roads or multipolygon relations are simulated yet. Buildings are opaque non-walkable 2D obstacles, not occupied 3D structures. A displayed highway is not proof of a complete routable transport network.
 
-The simulation pipeline must separately compile authoritative, validated geometry. Display pixels and provider-dependent zoom simplifications cannot define where people can move or see. Source provenance, extraction bounds, version/checksum and warnings should accompany imported/cacheable geometry, and saves must preserve the world version used by their campaign.
+Missing or unsupported data is unknown, not verified clear ground. The new cache guarantees the identity of the simplified geometry used, not the physical completeness or realism of the terrain.
 
-Map refresh must not silently change an ongoing battle's obstacles or road connectivity. Any world update needs an explicit migration/rebuild boundary.
+## Snapshot and cache contract
 
-## Distribution and hosting
+A geographic snapshot stores source.json, compiled.json, manifest.json and attribution.txt. IDs cover source bytes, bounds, compiler/schema version and endpoint. Source/compiled hashes and embedded provenance are checked on load. Validated writes use a staged directory and atomic rename; corrupt existing snapshots fail closed.
 
-Retain source attribution in the visible map UI and exported data. Do not treat community map infrastructure as an unlimited game CDN or implement bulk downloads against it by default. Provider terms, attribution and data-license requirements must be checked for the actual selected dataset/service before shipping downloads, caches or regional bundles.
+Exact cached region/endpoint reuse does not refresh OSM automatically. New battlefield installation requires an explicit review/replacement action. Downloads, parsing errors or cancellation do not replace the active battle.
 
-No external basemap is required for the current offline prototype. No API key is embedded in the repository.
+Checkpoints and exported scenarios embed compiled geometry and its provenance. Loading a saved battle does not need a live provider or the original raw-source cache. The native basemap's separate opportunistic tile cache is not a promise of offline world browsing or whole-country downloads.
+
+## Hosting and attribution
+
+Keep visible and exported OpenStreetMap attribution and source metadata. Do not treat public community servers as the shipping game's geographic backend. The default public Overpass endpoint is restricted in the UI to explicitly acknowledged, occasional development requests. There is no automatic retry, background region prefetch or bulk downloader; configure an appropriate provider/self-hosted endpoint for sustained use.
+
+The offline demo needs no external service. The repository embeds no API key. Enabling the live style contacts its style/tile/glyph/sprite providers. Dataset and service requirements must be reviewed again before distributing geography bundles or shipping a hosted service.

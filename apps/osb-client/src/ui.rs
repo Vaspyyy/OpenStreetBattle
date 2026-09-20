@@ -42,7 +42,7 @@ pub fn draw(mut contexts: EguiContexts, mut state: NonSendMut<ClientState>) -> R
         ctx.set_theme(egui::Theme::Dark);
         ctx.set_style_of(egui::Theme::Dark, style);
     }
-    if !ctx.egui_wants_keyboard_input() {
+    if !ctx.egui_wants_keyboard_input() && !state.world_open {
         if ctx.input(|i| i.key_pressed(egui::Key::Space)) {
             state.paused = !state.paused;
         }
@@ -88,10 +88,17 @@ pub fn draw(mut contexts: EguiContexts, mut state: NonSendMut<ClientState>) -> R
                         .color(egui::Color32::WHITE),
                 );
                 ui.label(
-                    egui::RichText::new("FOUNDATION  /  0.1")
+                    egui::RichText::new("REAL WORLD  /  PREVIEW")
                         .small()
                         .color(MUTED),
                 );
+                if ui.selectable_label(!state.world_open, "Battle").clicked() {
+                    state.world_open = false;
+                }
+                if ui.selectable_label(state.world_open, "World").clicked() {
+                    state.world_open = true;
+                    state.paused = true;
+                }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.monospace(
                         egui::RichText::new(clock(state.sim.tick()))
@@ -102,6 +109,13 @@ pub fn draw(mut contexts: EguiContexts, mut state: NonSendMut<ClientState>) -> R
                 });
             });
         });
+    if state.world_open {
+        let seed = state.seed;
+        if let Some(battle) = super::browser::draw(&mut viewport_ui, &mut state.browser, seed) {
+            state.install_geography(battle);
+        }
+        return Ok(());
+    }
     egui::Panel::bottom("events")
         .resizable(true)
         .default_size(170.0)
@@ -358,6 +372,22 @@ fn inspect(ui: &mut egui::Ui, s: &Soldier, state: &mut ClientState) {
     ui.monospace(format!("Persistent ID #{}", s.id.0));
     ui.label(format!("{:?}", s.action));
     ui.checkbox(&mut state.follow, "Follow this person");
+    ui.collapsing("Why this decision?", |ui| {
+        if let Some(history)=state.sim.decisions(s.id) {
+            if let Some(d)=history.back() {
+                ui.strong(d.reason.description());
+                ui.label(format!("Last evaluated tick {} (entered {})",d.tick,d.entered_at));
+                ui.label(format!("{:?} → {:?}",d.previous_action,d.action));
+                ui.label(format!("Navigation: {:?} / directive: {:?}",d.navigation,d.directive));
+                ui.label(format!("Decision inputs: morale {:.0}%, suppression {:.0}%, {} rounds",d.sampled_morale*100.0,d.sampled_suppression*100.0,d.sampled_ammunition));
+                ui.label(format!("{} known contacts",d.known_contacts));
+                if let Some((id,_,distance))=d.known_threat {ui.label(format!("Nearest known contact #{} / {distance:.0} m",id.0));}
+                if let Some(p)=d.destination {ui.label(format!("Destination: {:.1}, {:.1} m",p.x,p.y));}
+                ui.small("Captured before shot resolution. This is the actual code branch, not a generated explanation.");
+            }
+            ui.collapsing("Recent transitions",|ui|{for d in history.iter().rev() {ui.label(format!("{}: {:?} / {:?}",d.entered_at,d.reason,d.navigation));}});
+        } else {ui.label("No decisions recorded since creation or loading. Advance one tick.");}
+    });
     ui.separator();
     meter(ui, "Morale", s.morale);
     meter(ui, "Suppression", s.suppression);

@@ -8,6 +8,9 @@ permissions:
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
+defaults:
+  run:
+    shell: bash
 env:
   CARGO_BUILD_JOBS: 2
   CARGO_PROFILE_DEV_DEBUG: 0
@@ -24,16 +27,20 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-      - run: cargo test --locked --workspace --exclude osb-client
+      - name: Core tests
+        run: |
+          mkdir -p artifacts
+          cargo test --locked --workspace --exclude osb-client 2>&1 | tee artifacts/core-tests.log
       - run: python3 tools/check_boundaries.py
       - name: Headless combat smoke and checkpoint
         run: |
-          mkdir -p artifacts
           cargo run --locked -p osb-headless -- --duration 8m --save artifacts/smoke.osb --events artifacts/events.jsonl > artifacts/headless.json
           cargo run --locked -p osb-headless -- --load artifacts/smoke.osb --duration 10s > artifacts/resumed.json
           test -s artifacts/events.jsonl
-      - run: cargo clippy --locked --workspace --exclude osb-client --all-targets -- -D warnings
-      - run: cargo fmt --all -- --check
+      - name: Strict core lints and formatting
+        run: |
+          cargo clippy --locked --workspace --exclude osb-client --all-targets -- -D warnings 2>&1 | tee artifacts/clippy.log
+          cargo fmt --all -- --check
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -52,17 +59,63 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-      - run: cargo build --locked -p osb-client
+      - name: Offline client build and tests
+        run: |
+          mkdir -p artifacts
+          cargo build --locked -p osb-client 2>&1 | tee artifacts/build.log
+          cargo test --locked -p osb-client 2>&1 | tee artifacts/client-tests.log
       - name: Reject accidental X11 feature unification
         run: |
-          if cargo tree --locked -p osb-client -e features | grep -E 'winit feature "x11"|bevy feature "x11"'; then
+          cargo tree --locked -p osb-client -e features > artifacts/client-features.txt
+          if grep -E 'winit feature "x11"|bevy feature "x11"' artifacts/client-features.txt; then
             echo 'X11 feature unexpectedly enabled'; exit 1
           fi
       - name: Launch actual Wayland/Vulkan client under a headless compositor
         run: bash tools/wayland_smoke.sh
-      - run: cargo clippy --locked -p osb-client --all-targets -- -D warnings
+      - name: Strict client lints
+        run: cargo clippy --locked -p osb-client --all-targets -- -D warnings 2>&1 | tee artifacts/clippy.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: wayland-vulkan-validation
+          path: artifacts/
+  native-map:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.95.0
+        with:
+          components: rustfmt, clippy
+      - name: Native map dependencies
+        run: sudo apt-get update && sudo apt-get install -y libwayland-dev libxkbcommon-dev libvulkan-dev libclang-dev mesa-vulkan-drivers weston
+      - name: Install checksum-pinned MapLibre Vulkan prefix
+        run: |
+          mkdir -p artifacts
+          prefix=$(bash tools/setup-maplibre.sh 2> artifacts/setup.log)
+          test -n "$prefix"
+          echo "MAPLIBRE_NATIVE_C_INSTALL_DIR=$prefix" >> "$GITHUB_ENV"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - name: Live map client build and tests
+        run: |
+          cargo build --locked -p osb-client --features live-map 2>&1 | tee artifacts/build.log
+          cargo test --locked -p osb-client --features live-map 2>&1 | tee artifacts/client-tests.log
+      - name: Strict live map lints
+        run: cargo clippy --locked -p osb-client --features live-map --all-targets -- -D warnings 2>&1 | tee artifacts/clippy.log
+      - name: Reject X11 in live map client
+        run: |
+          cargo tree --locked -p osb-client --features live-map -e features > artifacts/client-features.txt
+          if grep -E 'winit feature "x11"|bevy feature "x11"' artifacts/client-features.txt; then exit 1; fi
+      - name: Actual MapLibre Vulkan render inside native Wayland client
+        env:
+          OSB_SMOKE_FRAMES: 300
+        run: |
+          bash tools/wayland_smoke.sh --world-smoke
+          grep -q OSB_BASEMAP_OK artifacts/client.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-world-map-validation
           path: artifacts/

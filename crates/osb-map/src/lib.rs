@@ -65,3 +65,6 @@ mod tests {
         assert_eq!(c.pixels_per_metre, 1.0);
     }
 }
+
+mod globe;
+pub use globe::{GlobeCamera, MERCATOR_LIMIT};
