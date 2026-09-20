@@ -1,0 +1,73 @@
+name: Apply real-world source and validate
+on:
+  push:
+    branches: [feature/real-world-scenarios]
+    paths: [.github/workflows/apply-map-source.yml]
+permissions:
+  contents: write
+concurrency:
+  group: apply-real-world-source
+  cancel-in-progress: false
+env:
+  CARGO_BUILD_JOBS: 2
+  CARGO_PROFILE_DEV_DEBUG: 0
+  CARGO_PROFILE_TEST_DEBUG: 0
+jobs:
+  apply:
+    if: github.ref == 'refs/heads/feature/real-world-scenarios'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify and apply audited source bundle
+        run: |
+          cat tools/.bootstrap-map-0.gzpart tools/.bootstrap-map-1.gzpart tools/.bootstrap-map-2.gzpart > /tmp/source.patch.gz
+          echo '8c0be43ae3b94627e082c02e1533a5bcfaba45604c7aa2a7fdd6edc10e386b3c  /tmp/source.patch.gz' | sha256sum --check
+          gzip -dc /tmp/source.patch.gz > /tmp/source.patch
+          git apply --check /tmp/source.patch
+          git apply /tmp/source.patch
+          rm tools/.bootstrap-map-*.gzpart .github/workflows/apply-map-source.yml .github/workflows/map-investigation.yml
+      - uses: dtolnay/rust-toolchain@1.95.0
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - name: Lock dependencies and format source
+        run: |
+          cargo generate-lockfile
+          cargo fmt --all
+          cargo fmt --manifest-path native/osb-map-native/Cargo.toml
+      - name: Commit source only to the guarded feature branch
+        run: |
+          git fetch origin feature/real-world-scenarios
+          test "$(git rev-parse origin/feature/real-world-scenarios)" = "$GITHUB_SHA"
+          git add -A
+          git diff --cached --stat
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'feat: add decision traces, native world browsing and verified geographic snapshots'
+          git push origin HEAD:feature/real-world-scenarios
+      - name: Native build and test dependencies
+        run: sudo apt-get update && sudo apt-get install -y libwayland-dev libxkbcommon-dev libvulkan-dev libclang-dev mesa-vulkan-drivers weston
+      - name: Install matching MapLibre Vulkan prefix
+        run: echo "MAPLIBRE_NATIVE_C_INSTALL_DIR=$(bash tools/setup-maplibre.sh)" >> "$GITHUB_ENV"
+      - name: Validate core, offline client and native map client
+        run: |
+          mkdir -p artifacts
+          cargo test --locked --workspace --exclude osb-client 2>&1 | tee artifacts/core-tests.log
+          python3 tools/check_boundaries.py
+          cargo test --locked -p osb-client 2>&1 | tee artifacts/client-tests.log
+          cargo build --locked -p osb-client --features live-map 2>&1 | tee artifacts/native-build.log
+          cargo test --locked -p osb-client --features live-map 2>&1 | tee artifacts/native-tests.log
+          cargo clippy --locked --workspace --all-targets --features osb-client/live-map -- -D warnings 2>&1 | tee artifacts/clippy.log
+          cargo fmt --all -- --check
+      - name: Launch both native views
+        run: |
+          bash tools/wayland_smoke.sh
+          mv artifacts/client.png artifacts/battle.png
+          OSB_SMOKE_FRAMES=300 bash tools/wayland_smoke.sh --world-smoke
+          grep -q OSB_BASEMAP_OK artifacts/client.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: real-world-source-validation
+          path: artifacts/
