@@ -8,6 +8,9 @@ permissions:
 concurrency:
   group: apply-real-world-source
   cancel-in-progress: false
+defaults:
+  run:
+    shell: bash
 env:
   CARGO_BUILD_JOBS: 2
   CARGO_PROFILE_DEV_DEBUG: 0
@@ -19,14 +22,15 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
-      - name: Verify and apply audited source bundle
+      - name: Verify and apply source without changing workflows
         run: |
           cat tools/.bootstrap-map-0.gzpart tools/.bootstrap-map-1.gzpart tools/.bootstrap-map-2.gzpart > /tmp/source.patch.gz
           echo '8c0be43ae3b94627e082c02e1533a5bcfaba45604c7aa2a7fdd6edc10e386b3c  /tmp/source.patch.gz' | sha256sum --check
           gzip -dc /tmp/source.patch.gz > /tmp/source.patch
           git apply --check /tmp/source.patch
           git apply /tmp/source.patch
-          rm tools/.bootstrap-map-*.gzpart .github/workflows/apply-map-source.yml .github/workflows/map-investigation.yml
+          git restore --source=HEAD --staged --worktree .github/workflows
+          rm tools/.bootstrap-map-*.gzpart
       - uses: dtolnay/rust-toolchain@1.95.0
         with:
           components: rustfmt, clippy
@@ -43,19 +47,27 @@ jobs:
           git fetch origin feature/real-world-scenarios
           test "$(git rev-parse origin/feature/real-world-scenarios)" = "$GITHUB_SHA"
           git add -A
+          git diff --cached --exit-code -- .github/workflows
           git diff --cached --stat
           git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'feat: add decision traces, native world browsing and verified geographic snapshots'
           git push origin HEAD:feature/real-world-scenarios
-      - name: Native build and test dependencies
-        run: sudo apt-get update && sudo apt-get install -y libwayland-dev libxkbcommon-dev libvulkan-dev libclang-dev mesa-vulkan-drivers weston
-      - name: Install matching MapLibre Vulkan prefix
-        run: echo "MAPLIBRE_NATIVE_C_INSTALL_DIR=$(bash tools/setup-maplibre.sh)" >> "$GITHUB_ENV"
-      - name: Validate core, offline client and native map client
-        run: |
           mkdir -p artifacts
+          git archive --format=tar HEAD > artifacts/source-after-apply.tar
+      - name: Core tests and dependency boundaries
+        run: |
           cargo test --locked --workspace --exclude osb-client 2>&1 | tee artifacts/core-tests.log
           python3 tools/check_boundaries.py
-          cargo test --locked -p osb-client 2>&1 | tee artifacts/client-tests.log
+      - name: Native build and test dependencies
+        run: sudo apt-get update && sudo apt-get install -y libwayland-dev libxkbcommon-dev libvulkan-dev libclang-dev mesa-vulkan-drivers weston
+      - name: Offline client tests
+        run: cargo test --locked -p osb-client 2>&1 | tee artifacts/client-tests.log
+      - name: Install matching MapLibre Vulkan prefix
+        run: |
+          prefix=$(bash tools/setup-maplibre.sh)
+          test -n "$prefix"
+          echo "MAPLIBRE_NATIVE_C_INSTALL_DIR=$prefix" >> "$GITHUB_ENV"
+      - name: Validate native map client
+        run: |
           cargo build --locked -p osb-client --features live-map 2>&1 | tee artifacts/native-build.log
           cargo test --locked -p osb-client --features live-map 2>&1 | tee artifacts/native-tests.log
           cargo clippy --locked --workspace --all-targets --features osb-client/live-map -- -D warnings 2>&1 | tee artifacts/clippy.log
