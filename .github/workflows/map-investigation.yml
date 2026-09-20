@@ -8,19 +8,28 @@ permissions:
 jobs:
   inspect:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - name: Collect source and native map API for integration
+      - name: Collect matching native artifact metadata and Rust API
         run: |
           mkdir -p artifacts
-          git archive --format=tar HEAD > artifacts/osb-source.tar
-          git clone --depth 1 https://github.com/maplibre/maplibre-native-ffi.git /tmp/maplibre-ffi
-          git -C /tmp/maplibre-ffi rev-parse HEAD > artifacts/maplibre-revision.txt
-          tar -C /tmp/maplibre-ffi --exclude='*.ttf' --exclude='*.otf' --exclude='*.woff*' --exclude='.git' -czf artifacts/maplibre-api.tar.gz bindings/rust include CMakeLists.txt CMakePresets.json
-          curl --fail --silent --show-error https://api.github.com/repos/maplibre/maplibre-native-ffi/releases/tags/snapshot > artifacts/maplibre-snapshot.json
+          curl --fail --silent --show-error https://api.github.com/repos/maplibre/maplibre-native-ffi/releases/tags/unstable-native-snapshot > /tmp/release.json
+          jq '{tag_name,target_commitish,assets:[.assets[] | select(.name == "maplibre-native-c-linux-gnu-x64-vulkan.tar.gz") | {id,name,digest,browser_download_url}]}' /tmp/release.json > artifacts/native-meta.json
+          git init /tmp/maplibre-ffi
+          git -C /tmp/maplibre-ffi remote add origin https://github.com/maplibre/maplibre-native-ffi.git
+          git -C /tmp/maplibre-ffi fetch --depth 1 origin 6f7998eec595560c0359ed033519cbab1f7c9aeb
+          git -C /tmp/maplibre-ffi checkout --detach FETCH_HEAD
+          tar -C /tmp/maplibre-ffi --exclude='*.ttf' --exclude='*.otf' --exclude='*.woff*' --exclude='.git' -czf artifacts/maplibre-api-pinned.tar.gz bindings/rust include Cargo.toml
+          url=$(jq -r '.assets[0].browser_download_url' artifacts/native-meta.json)
+          curl --fail --location --retry 2 "$url" -o /tmp/native.tar.gz
+          sha256sum /tmp/native.tar.gz > artifacts/native-sha256.txt
+          mkdir /tmp/native
+          tar -xzf /tmp/native.tar.gz -C /tmp/native
+          find /tmp/native -name artifact.json -exec cp {} artifacts/native-artifact.json \;
+          ldd /tmp/native/lib/libmaplibre-native-c.so > artifacts/native-linkage.txt || true
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: map-integration-source
+          name: map-integration-pinned-api
           path: artifacts/
