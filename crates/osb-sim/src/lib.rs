@@ -1,5 +1,8 @@
 //! Fixed-step reference simulation shared by the native observer and headless runner.
 //! No wall clock, camera, network, rendering or nondeterministic parallel scheduling here.
+mod decision;
+use decision::DecisionLog;
+pub use decision::{DECISION_HISTORY, DecisionReason, DecisionRecord, NavigationOutcome};
 mod model;
 mod spatial;
 use bevy_ecs::prelude::{Entity, World};
@@ -36,6 +39,7 @@ pub struct Simulation {
     seed: u64,
     rng: u64,
     next_event: u64,
+    decisions: DecisionLog,
 }
 /// Explicit SplitMix64 state, serialized in snapshots. Not cryptographic randomness.
 fn random(state: &mut u64) -> u64 {
@@ -74,6 +78,7 @@ impl Simulation {
             seed,
             rng: seed,
             next_event: 1,
+            decisions: DecisionLog::enabled(),
         };
         let mut next_soldier = 1u64;
         let mut next_formation = 1u64;
@@ -246,6 +251,16 @@ impl Simulation {
             .filter_map(|&e| self.world.get::<Soldier>(e).cloned())
             .collect()
     }
+    /// Read-only diagnostic history. Empty after loading until a tick is evaluated.
+    pub fn decisions(&self, id: SoldierId) -> Option<&VecDeque<DecisionRecord>> {
+        self.decisions.records.get(&id)
+    }
+    pub fn set_diagnostics_enabled(&mut self, enabled: bool) {
+        self.decisions.enabled = enabled;
+        if !enabled {
+            self.decisions.records.clear();
+        }
+    }
     pub fn snapshot(&self) -> Snapshot {
         Snapshot {
             schema_version: SNAPSHOT_VERSION,
@@ -283,6 +298,7 @@ impl Simulation {
             seed: snapshot.seed,
             rng: snapshot.rng_state,
             next_event: snapshot.next_event,
+            decisions: DecisionLog::enabled(),
         })
     }
     pub fn fingerprint(&self) -> Result<String, SimError> {
@@ -447,10 +463,13 @@ impl Simulation {
             next[i].contacts = known.into_values().collect();
         }
     }
-    fn move_agent(&self, s: &mut Soldier, destination: Point, speed: f64) {
+    fn move_agent(&self, s: &mut Soldier, destination: Point, speed: f64) -> NavigationOutcome {
         if !self.scenario.map.walkable(destination) {
-            return;
+            return NavigationOutcome::InvalidDestination;
         }
+        let initial_position = s.position;
+        let waiting_to_repath = self.tick < s.repath_at;
+        let mut blocked = false;
         if s.destination.is_none_or(|d| d.distance(destination) > 4.0) {
             s.destination = Some(destination);
             s.path.clear();
@@ -468,6 +487,7 @@ impl Simulation {
             let p = s.position.toward(waypoint, remaining);
             if !self.scenario.map.clear_segment(s.position, p) {
                 s.path.clear();
+                blocked = true;
                 break;
             }
             s.position = p;
@@ -482,6 +502,17 @@ impl Simulation {
             }
         }
         s.fatigue = (s.fatigue + 0.0006).min(1.0);
+        if blocked {
+            NavigationOutcome::BlockedSegment
+        } else if s.position.distance(destination) <= 0.5 {
+            NavigationOutcome::Arrived
+        } else if s.position != initial_position {
+            NavigationOutcome::Moved
+        } else if waiting_to_repath {
+            NavigationOutcome::WaitingToRepath
+        } else {
+            NavigationOutcome::NoRoute
+        }
     }
     fn cover_position(&self, s: &Soldier, threat: Point) -> Option<Point> {
         let mut candidates = Vec::new();
@@ -583,14 +614,18 @@ impl Simulation {
         let mut claimed_patients = BTreeSet::new();
         let mut treatments = Vec::new();
         let mut shots = Vec::new();
+        let mut reasons = vec![DecisionReason::AlreadySurrendered; next.len()];
+        let mut navigation = vec![NavigationOutcome::NotRequested; next.len()];
         for i in 0..next.len() {
             let old = &observed[i];
             let s = &mut next[i];
             if s.health.dead {
+                reasons[i] = DecisionReason::Dead;
                 s.set_action(Action::Dead, self.tick);
                 continue;
             }
             if !s.health.conscious() {
+                reasons[i] = DecisionReason::Unconscious;
                 s.set_action(Action::Incapacitated, self.tick);
                 continue;
             }
@@ -622,6 +657,7 @@ impl Simulation {
                 && friend_count == 0
                 && nearest.is_some_and(|e| s.position.distance(e.position) < 45.0)
             {
+                reasons[i] = DecisionReason::IsolatedAndOverwhelmed;
                 s.set_action(Action::Surrendered, self.tick);
                 self.emit(
                     EventKind::Surrender,
@@ -633,8 +669,13 @@ impl Simulation {
                 continue;
             }
             if s.morale < 0.22 || form.directive == Directive::Withdraw {
+                reasons[i] = if s.morale < 0.22 {
+                    DecisionReason::LowMorale
+                } else {
+                    DecisionReason::CommanderWithdrawal
+                };
                 s.set_action(Action::Retreating, self.tick);
-                self.move_agent(s, form.rally, 2.8);
+                navigation[i] = self.move_agent(s, form.rally, 2.8);
                 continue;
             }
             let patient = if s.inventory.medical_supplies > 0 && s.suppression < 0.65 {
@@ -664,9 +705,16 @@ impl Simulation {
             if let Some(j) = patient {
                 let p = &observed[j];
                 claimed_patients.insert(p.id);
+                reasons[i] = if j == i {
+                    DecisionReason::TreatSelf
+                } else if s.medic {
+                    DecisionReason::MedicAssistance
+                } else {
+                    DecisionReason::HelpBondedComrade
+                };
                 s.set_action(Action::Assisting(p.id), self.tick);
                 if s.position.distance(p.position) > 2.0 {
-                    self.move_agent(s, p.position, 1.8);
+                    navigation[i] = self.move_agent(s, p.position, 1.8);
                 } else if self.tick - s.action_since >= 30 {
                     s.inventory.medical_supplies -= 1;
                     treatments.push((i, j));
@@ -676,6 +724,7 @@ impl Simulation {
             }
             if let Some(contact) = nearest {
                 if s.suppression > 0.6 {
+                    reasons[i] = DecisionReason::SuppressedByKnownContact;
                     s.set_action(Action::TakingCover, self.tick);
                     if s.path.is_empty()
                         && self.tick >= s.repath_at
@@ -684,7 +733,7 @@ impl Simulation {
                         s.destination = Some(cover);
                     }
                     if let Some(cover) = s.destination {
-                        self.move_agent(s, cover, 1.5);
+                        navigation[i] = self.move_agent(s, cover, 1.5);
                     }
                     continue;
                 }
@@ -698,6 +747,7 @@ impl Simulation {
                         .map
                         .visible(s.position, contact.position, weapon.range_m)
                 {
+                    reasons[i] = DecisionReason::EngageKnownContact;
                     s.set_action(Action::Engaging(contact.enemy), self.tick);
                     if self.tick >= s.cooldown_until {
                         s.inventory.rounds -= 1;
@@ -710,12 +760,28 @@ impl Simulation {
             let goal = form.target;
             let distance = s.position.distance(goal);
             if distance > form.intent.radius_m * 0.45 {
+                reasons[i] = DecisionReason::MoveToAssignedObjective;
                 s.set_action(Action::Moving, self.tick);
-                self.move_agent(s, goal, 1.8);
+                navigation[i] = self.move_agent(s, goal, 1.8);
             } else {
+                reasons[i] = DecisionReason::HoldAtAssignedObjective;
                 s.set_action(Action::Holding, self.tick);
                 s.path.clear();
             }
+        }
+        for i in 0..next.len() {
+            let form = self
+                .formations
+                .iter()
+                .find(|f| f.id == next[i].current_group);
+            self.decisions.record(
+                self.tick,
+                &observed[i],
+                &next[i],
+                reasons[i],
+                navigation[i],
+                form,
+            );
         }
         for (i, j) in treatments {
             if !next[j].health.dead {

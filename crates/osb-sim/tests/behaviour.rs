@@ -86,3 +86,39 @@ fn medical_items_are_conserved_except_for_treatment() {
         .count() as u32;
     assert_eq!(before - after, used);
 }
+
+#[test]
+fn decision_diagnostics_do_not_change_authoritative_outcomes() {
+    let mut traced = osb_sim::Simulation::new(osb_sim::Scenario::demo(), 42).unwrap();
+    let mut silent = osb_sim::Simulation::new(osb_sim::Scenario::demo(), 42).unwrap();
+    silent.set_diagnostics_enabled(false);
+    traced.advance(3200).unwrap();
+    silent.advance(3200).unwrap();
+    assert_eq!(traced.fingerprint().unwrap(), silent.fingerprint().unwrap());
+    for soldier in traced.soldiers() {
+        let history = traced.decisions(soldier.id).unwrap();
+        assert!(!history.is_empty() && history.len() <= osb_sim::DECISION_HISTORY);
+        assert!(silent.decisions(soldier.id).is_none());
+    }
+}
+
+#[test]
+fn decision_trace_records_actual_objective_branch_and_has_no_invented_enemy() {
+    let mut sim = osb_sim::Simulation::new(osb_sim::Scenario::demo(), 1).unwrap();
+    sim.step().unwrap();
+    let trace = sim
+        .decisions(osb_sim::SoldierId(1))
+        .unwrap()
+        .back()
+        .unwrap();
+    assert_eq!(
+        trace.reason,
+        osb_sim::DecisionReason::MoveToAssignedObjective
+    );
+    assert_eq!(trace.known_contacts, 0);
+    assert!(trace.known_threat.is_none());
+    assert_eq!(trace.tick, 1);
+    assert!(trace.destination.is_some());
+    let restored = osb_sim::Simulation::restore(sim.snapshot()).unwrap();
+    assert!(restored.decisions(osb_sim::SoldierId(1)).is_none());
+}

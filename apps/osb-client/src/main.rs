@@ -3,6 +3,8 @@ compile_error!(
     "OpenStreetBattle's native client currently supports Linux/Wayland only. The core is platform-independent."
 );
 
+mod browser;
+mod geographic;
 mod ui;
 use bevy::{
     prelude::*,
@@ -48,6 +50,9 @@ struct Args {
     /// Explicit software Vulkan adapter for CI. Never selects OpenGL.
     #[arg(long)]
     software_renderer: bool,
+    /// Open world view with the network-free native fixture (CI only).
+    #[arg(long, requires = "smoke_frames")]
+    world_smoke: bool,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum EditMode {
@@ -59,6 +64,8 @@ enum EditMode {
 }
 struct ClientState {
     sim: Simulation,
+    browser: browser::BrowserState,
+    world_open: bool,
     view: Vec<Soldier>,
     previous: BTreeMap<SoldierId, Point>,
     camera: MapCamera,
@@ -81,6 +88,24 @@ struct ClientState {
     frame: u64,
 }
 impl ClientState {
+    fn install_geography(&mut self, battle: geographic::PreparedBattle) {
+        self.sim = battle.simulation;
+        self.seed = self.sim.snapshot().seed;
+        self.draft = self.sim.scenario().clone();
+        self.camera = MapCamera::new(self.draft.map.bounds.center());
+        self.previous.clear();
+        self.accumulator = 0.0;
+        self.paused = true;
+        self.follow = false;
+        self.world_open = false;
+        self.mode = EditMode::Inspect;
+        self.refresh();
+        self.selected = self.view.first().map(|s| s.id);
+        self.status = format!(
+            "Geographic snapshot {} loaded. Inspect terrain and edit forces before Play.",
+            battle.snapshot.manifest.id
+        );
+    }
     fn refresh(&mut self) {
         self.view = self.sim.soldiers();
     }
@@ -210,6 +235,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     if args.smoke_frames.is_some_and(|n| n < 30) {
         return Err("--smoke-frames must be at least 30".into());
     }
+    if args.world_smoke && !cfg!(feature = "live-map") {
+        return Err("--world-smoke requires --features live-map".into());
+    }
     let sim = if let Some(path) = args.load.as_ref() {
         Simulation::restore(osb_campaign::load(path)?)?
     } else {
@@ -232,6 +260,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     let selected = view.first().map(|s| s.id);
     let state = ClientState {
         sim,
+        browser: browser::BrowserState::new(args.software_renderer, args.world_smoke),
+        world_open: args.world_smoke,
         view,
         previous: BTreeMap::new(),
         camera,
@@ -303,7 +333,7 @@ fn setup(mut commands: Commands, adapter: Res<RenderAdapterInfo>) {
 }
 fn tick(time: Res<Time<Real>>, mut state: NonSendMut<ClientState>) {
     state.frame += 1;
-    if state.paused {
+    if state.paused || state.world_open {
         return;
     }
     state.accumulator += time.delta_secs_f64().min(0.25) * state.speed;
@@ -330,11 +360,12 @@ fn smoke(
     mut state: NonSendMut<ClientState>,
 ) {
     test.frame += 1;
-    if test.frames.is_some() && test.frame == 2 {
+    if test.frames.is_some() && test.frame == 2 && !state.world_open {
         state.paused = false;
         state.speed = 5.0;
     }
-    if test.frame == 20
+    if ((!state.world_open && test.frame >= 20)
+        || (state.world_open && state.browser.basemap_ready))
         && !test.captured
         && let Some(path) = test.screenshot.as_ref()
     {
@@ -344,6 +375,14 @@ fn smoke(
         test.captured = true;
     }
     if test.frames.is_some_and(|n| test.frame >= n) {
+        if state.world_open && (!state.browser.basemap_ready || !test.captured) {
+            error!("OSB_BASEMAP_FAILED: native fixture did not complete");
+            exit.write(AppExit::error());
+            return;
+        }
+        if state.world_open {
+            info!("OSB_BASEMAP_OK");
+        }
         info!(
             "OSB_SMOKE_OK tick={} people={}",
             state.sim.tick(),
